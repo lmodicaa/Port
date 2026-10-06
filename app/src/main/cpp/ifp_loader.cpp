@@ -663,6 +663,20 @@ std::map<std::string, Animation> load_ifp(
 
                 /*
                  * ------------------------------------------------
+                 * Validacion de tiempo
+                 * ------------------------------------------------
+                 */
+                for (const auto& track : animation.tracks) {
+                    for (size_t k = 0; k + 1 < track.keyframes.size(); ++k) {
+                        if (track.keyframes[k].time > track.keyframes[k+1].time + 0.0001f) {
+                            LOGE("IFP TIEMPO INVALIDO en %s bone %u: frame %zu(%.4f) > frame %zu(%.4f)", 
+                                 animation.name.c_str(), track.bone_id, k, track.keyframes[k].time, k+1, track.keyframes[k+1].time);
+                        }
+                    }
+                }
+
+                /*
+                 * ------------------------------------------------
                  * Store animation
                  * ------------------------------------------------
                  */

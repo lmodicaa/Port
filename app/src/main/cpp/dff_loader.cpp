@@ -167,7 +167,7 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
         }
         
         // Leemos los triángulos (4 uint16_t por cara: v2, v1, materialId, v3)
-        uint16_t vertex_offset = static_cast<uint16_t>(model.vertices.size());
+        uint32_t vertex_offset = static_cast<uint32_t>(model.vertices.size());
         for (uint32_t i = 0; i < numTriangles; i++) {
             uint16_t v2  = r.read<uint16_t>();
             uint16_t v1  = r.read<uint16_t>();
@@ -211,7 +211,7 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
 
             // Leer normales si existen
             if (has_nrm && m == 0) {
-                uint16_t voff = static_cast<uint16_t>(model.vertices.size() - numVertices);
+                uint32_t voff = static_cast<uint32_t>(model.vertices.size() - numVertices);
                 for (uint32_t i = 0; i < numVertices; i++) {
                     float nx = r.read<float>();
                     float ny = r.read<float>();
@@ -377,6 +377,24 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
             if (b.matrix_index != 0xFFFFFFFF) framesWithSkin++;
         }
         LOGI("Validacion Skin: %zu matrices de skin. %zu frames mapeados a skin.", skinCount, framesWithSkin);
+    }
+    // Normalizar pesos para evitar distorsiones
+    for (auto& v : model.vertices) {
+        float sum = v.bone_weights[0] + v.bone_weights[1] + v.bone_weights[2] + v.bone_weights[3];
+        if (sum > 0.0f) {
+            if (std::abs(sum - 1.0f) > 0.001f) {
+                v.bone_weights[0] /= sum;
+                v.bone_weights[1] /= sum;
+                v.bone_weights[2] /= sum;
+                v.bone_weights[3] /= sum;
+            }
+        } else {
+            v.bone_weights[0] = 1.0f;
+            v.bone_indices[0] = 0;
+            v.bone_weights[1] = 0.0f;
+            v.bone_weights[2] = 0.0f;
+            v.bone_weights[3] = 0.0f;
+        }
     }
     
     return model;

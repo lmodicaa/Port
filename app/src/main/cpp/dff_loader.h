@@ -31,9 +31,9 @@ struct DFFBone {
 // son los que usa el motor original, no constantes inventadas.
 struct MaterialData {
     float color[4]      = {1.f, 1.f, 1.f, 1.f}; // diffuse/color RGBA (0..1)
-    float ambient       = 0.f;                  // coeficiente ambiente
-    float diffuse       = 1.f;                  // coeficiente difuso
-    float specular      = 0.f;                  // coeficiente especular
+    float ambient       = 1.0f;                 // coeficiente ambiente default seguro
+    float diffuse       = 1.0f;                 // coeficiente difuso default seguro
+    float specular      = 0.0f;                 // coeficiente especular
     std::string texture;                        // nombre de textura (vacío = sin textura)
 };
 

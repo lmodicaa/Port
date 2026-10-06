@@ -587,10 +587,9 @@ static void setup_model() {
             auto& cash_model = cash_models.begin()->second;
             g_cash_model = cash_model;
             upload_dff_to_gpu(cash_model, rd);
+            dump_cash_debug(cash_model);
             g_model_render["cash"] = rd;
             
-            // Asumimos que el origen del modelo ya está en los pies (Y=0)
-            // Si calculamos el mínimo Y a veces toma vértices invisibles o huesos de armas y lo hace flotar.
             g_cash_y_offset = 0.0f;
             LOGI("Cash model loaded. Y-Offset manual: %.3f", g_cash_y_offset);
         }
@@ -672,6 +671,10 @@ static void setup_model() {
     auto ifp_raw = read_asset("levels/asylum/allanims.ifp");
     if (!ifp_raw.empty()) {
         g_anims = load_ifp(ifp_raw.data(), ifp_raw.size());
+        LOGI("REAL ANIMATION NAMES IN IFP:");
+        for (const auto& pair : g_anims) {
+            LOGI(" - %s", pair.first.c_str());
+        }
     } else {
         LOGE("No se encontro allanims.ifp");
     }
@@ -913,24 +916,29 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         /*
          * Primero intentamos encontrar las animaciones exactas.
          */
-        if (speed > 0.6f) {
-            anim = find_anim("Run_Fwd");
-        } else if (speed > 0.05f) {
-            anim = find_anim("Walk_Fwd");
+        const Animation* anim = nullptr;
+        std::string anim_name;
+        if (g_debug_anim_idx >= 0 && g_debug_anim_idx < (int)g_anims.size()) {
+            auto it = g_anims.begin();
+            std::advance(it, g_debug_anim_idx);
+            anim = &it->second;
+            anim_name = anim->name;
+        } else if (g_debug_anim_idx == -1) {
+            anim = nullptr;
+            anim_name = "Bind Pose";
         } else {
-            anim = find_anim("Stand_Idle");
-        }
-        /*
-         * Si no existen esas animaciones, usamos Stand_Idle.
-         */
-        if (!anim) {
-            anim = find_anim("Stand_Idle");
-        }
-        /*
-         * Último fallback.
-         */
-        if (!anim && !g_anims.empty()) {
-            anim = &g_anims.begin()->second;
+            if (speed > 0.6f) {
+                anim = find_anim("Run_Fwd");
+                anim_name = "Run_Fwd";
+            } else if (speed > 0.05f) {
+                anim = find_anim("Walk_Fwd");
+                anim_name = "Walk_Fwd";
+            } else {
+                anim = find_anim("Stand_Idle");
+                anim_name = "Stand_Idle";
+            }
+            if (!anim) anim = find_anim("Stand_Idle");
+            if (!anim && !g_anims.empty()) anim = &g_anims.begin()->second;
         }
         /*
          * --------------------------------------------------------
@@ -1346,6 +1354,12 @@ Java_com_manhunt_port_ManhuntRenderer_nativeJump(JNIEnv*, jobject) {
         g_vel_y = 8.0f;
         g_on_ground = false;
     }
+    // Cycle debug animation
+    g_debug_anim_idx++;
+    if (g_debug_anim_idx >= (int)g_anims.size()) {
+        g_debug_anim_idx = -1; // -1 = bind pose
+    }
+    LOGI("DEBUG ANIM INDEX: %d", g_debug_anim_idx);
 }
 
 // Mantener compatibilidad con nativeDrag/nativeScale anteriores (los elimino)
