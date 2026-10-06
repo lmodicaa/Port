@@ -853,6 +853,7 @@ struct PlayerControlConfig {
 
     float aim_axis_width = 10.0f;
     float move_axis_width = 10.0f;
+    float cam_position[3] = {0.1f, 0.0f, -0.1f};
     float aim_zones[10] = {3.0f, 8.0f, 12.0f, 18.0f, 25.0f, 35.0f, 45.0f, 57.0f, 76.0f, 125.0f};
     float vertical_aim_limit = 9.30f;
     float turn_pause = 0.27f;
@@ -1108,6 +1109,11 @@ static void parse_entity_type_data(
                     g_player_control.move_run_threshold;
             } else if (lower_key == "move_axis_width") {
                 parts >> g_player_control.move_axis_width;
+            } else if (lower_key == "cam_position") {
+                char comma;
+                parts >> g_player_control.cam_position[0] >> comma
+                      >> g_player_control.cam_position[1] >> comma
+                      >> g_player_control.cam_position[2];
             } else if (lower_key == "move_trans_speed") {
                 parts >> g_player_control.move_transition_speed;
             } else if (lower_key == "sneak_walk_speed") {
@@ -3317,10 +3323,22 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     }
 
     // ── Cámara Orbit ───────────────────────────────────────────────────────
+    // CAM_POSITION del entityTypeData.ini:
+    // x = arriba, y = derecha, z = -view.
+    // Se aplica en el espacio local del personaje/cámara.
+    const float cam_yaw_cos = cosf(g_player_yaw);
+    const float cam_yaw_sin = sinf(g_player_yaw);
+    const Vec3 cam_local_offset = {
+        g_player_control.cam_position[1] * cam_yaw_cos -
+            g_player_control.cam_position[2] * cam_yaw_sin,
+        g_player_control.cam_position[0],
+        g_player_control.cam_position[1] * (-cam_yaw_sin) -
+            g_player_control.cam_position[2] * cam_yaw_cos
+    };
     const Vec3 target = {
-        g_player_pos.x,
-        g_player_pos.y + 1.5f,
-        g_player_pos.z
+        g_player_pos.x + cam_local_offset.x,
+        g_player_pos.y + 1.5f + cam_local_offset.y,
+        g_player_pos.z + cam_local_offset.z
     };
 
     Vec3 cam_pos;
