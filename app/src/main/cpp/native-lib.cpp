@@ -625,6 +625,48 @@ static Mat4 mat4_rotate_z(float angle) {
 static DFFModel g_cash_model;
 static float g_player_yaw = 0.0f;
 static float g_anim_time = 0.f;
+static float animation_root_motion_speed(const Animation* anim) {
+    if (!anim || anim->duration <= 0.0001f) return 0.0f;
+
+    // HAnim del Player usa el nodo raíz 1000. Su traslación se mantiene
+    // fuera del esqueleto visual y representa el desplazamiento del actor.
+    for (const auto& track : anim->tracks) {
+        if (track.bone_id != 1000 ||
+            track.keyframes.size() < 2 ||
+            (track.frame_type != 2 && track.frame_type != 3)) {
+            continue;
+        }
+
+        const auto& first = track.keyframes.front();
+        const auto& last  = track.keyframes.back();
+        const float dx = last.tx - first.tx;
+        const float dz = last.tz - first.tz;
+        const float distance = sqrtf(dx * dx + dz * dz);
+
+        if (distance > 0.0001f) {
+            return distance / anim->duration;
+        }
+    }
+
+    return 0.0f;
+}
+
+static bool is_looping_locomotion_animation(const Animation* anim) {
+    if (!anim) return false;
+    if (g_debug_anim_idx == -2) return true;
+
+    const std::string& n = anim->name;
+    return n == "Stand_Idle" ||
+           n == "Walk_Fwd" || n == "Walk_Bkw" ||
+           n == "Walk_Left" || n == "Walk_Right" ||
+           n == "Run_Fwd" || n == "Run_Bkw" ||
+           n == "Run_Left" || n == "Run_Right" ||
+           n == "Sneak_Walk_Fwd" || n == "Sneak_Walk_Bkw" ||
+           n == "Sneak_Walk_Left" || n == "Sneak_Walk_Right" ||
+           n == "Sprint_Fwd" || n == "Sprint_Bkw" ||
+           n == "Sprint_Left" || n == "Sprint_Right";
+}
+
 static std::string g_last_played_anim;
 static const Animation* g_current_anim = nullptr;
 static const Animation* g_previous_anim = nullptr;
@@ -642,10 +684,9 @@ static float g_move_right = 0.f;  // -1..1  (izquierda/derecha)
 static float  g_vel_y    = 0.f;
 static bool   g_on_ground= false;
 static const float GRAVITY        = -20.0f;
-// Tope provisional basado en la magnitud de movimiento documentada
-// para personajes en PLAYER_PHYS. El valor original exacto de caminar
-// no está expuesto directamente en nuestros archivos de datos.
-static const float MOVE_SPEED     = 6.5f;
+// JUMP_FORWARD_VELOCITY no se usa como velocidad de locomoción.
+// Sólo queda como respaldo mientras una animación no tenga root-motion.
+static const float MOVE_SPEED_FALLBACK = 6.5f;
 
 // Altura máxima de escalón que el actor puede salvar sin saltar.
 // Se mantiene por debajo de la altura de las esferas inferiores del
@@ -2687,12 +2728,14 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     }
 
     if (input_strength > 0.01f) {
-        // Mantener dirección, pero usar la intensidad recalibrada.
+        // Superado el dead-zone, la velocidad la determina la animación.
+        // No reducimos el desplazamiento por la posición del joystick:
+        // eso desacopla los pies del root-motion original.
         const float inv =
             1.0f / std::max(raw_input_strength, 1e-6f);
 
-        vel_xz.x *= inv * input_strength;
-        vel_xz.z *= inv * input_strength;
+        vel_xz.x *= inv;
+        vel_xz.z *= inv;
 
         // No forzar el yaw hacia el stick: las animaciones Fwd/Bkw/Left/Right
         // necesitan conservar la orientación actual del personaje.
@@ -2701,24 +2744,20 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         vel_xz = {0.0f, 0.0f, 0.0f};
     }
 
-    // MOVE_THRESHOLDS define directamente las zonas del stick.
-    // No se suaviza la entrada física: la respuesta es inmediata.
-    float movement_multiplier = g_player_control.walk_speed;
+    // La animación elegida contiene el desplazamiento original del ciclo.
+    // Usarlo como velocidad mantiene sincronizados pasos y desplazamiento.
+    const float root_motion_speed =
+        animation_root_motion_speed(anim);
 
-    if (input_strength < g_player_control.move_walk_threshold) {
-        movement_multiplier =
-            g_player_control.sneak_walk_speed;
-    } else if (input_strength >=
-               g_player_control.move_run_threshold ||
-               input_strength >= g_player_control.run_threshold) {
-        movement_multiplier =
-            g_player_control.run_speed;
-    }
+    const float movement_speed =
+        root_motion_speed > 0.0001f
+            ? root_motion_speed
+            : MOVE_SPEED_FALLBACK;
 
     const float move_dx =
-        vel_xz.x * MOVE_SPEED * movement_multiplier * dt;
+        vel_xz.x * movement_speed * dt;
     const float move_dz =
-        vel_xz.z * MOVE_SPEED * movement_multiplier * dt;
+        vel_xz.z * movement_speed * dt;
 
     // Resolver el desplazamiento en pequeños pasos evita atravesar
     // superficies finas cuando un frame produce un movimiento grande.
@@ -3397,11 +3436,16 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                     }
                 }
             }
+            const float root_speed =
+                animation_root_motion_speed(anim);
+
             LOGI(
-                "ANIM ROOT DATA: %s translation=%d X=[%.3f,%.3f] Z=[%.3f,%.3f]",
+                "ANIM ROOT DATA: %s duration=%.3f translation=%d X=[%.3f,%.3f] Z=[%.3f,%.3f] root_speed=%.3f",
                 anim->name.c_str(),
+                anim->duration,
                 has_translation ? 1 : 0,
-                min_tx, max_tx, min_tz, max_tz
+                min_tx, max_tx, min_tz, max_tz,
+                root_speed
             );
             LOGI(
                 "ANIM CHANGE: %s duration=%.3f tracks=%zu input=%.3f",
@@ -3444,11 +3488,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         float animation_time = 0.0f;
         if (anim && anim->duration > 0.0f) {
             const bool loop_animation =
-                (g_debug_anim_idx == -2) ||
-                anim->name == "Stand_Idle" ||
-                anim->name == "Walk_Fwd" ||
-                anim->name == "Run_Fwd" ||
-                anim->name == "Sprint_Fwd";
+                is_looping_locomotion_animation(anim);
 
             if (loop_animation) {
                 animation_time = fmodf(
