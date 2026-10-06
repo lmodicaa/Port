@@ -106,6 +106,38 @@ static Mat4 mat4_from_pos_yaw(Vec3 pos, float yaw) {
     return r;
 }
 
+static Mat4 mat4_from_pos_cash(Vec3 pos, float yaw) {
+    // Cash was authored with Z-up local coordinates while the runtime
+    // uses Y-up. Convert local Z-up -> runtime Y-up first, then apply
+    // the gameplay yaw around the runtime Y axis.
+    const float cy = cosf(yaw);
+    const float sy = sinf(yaw);
+
+    // R = Ry(yaw) * Rx(-90°)
+    // Local up (+Z) becomes runtime up (+Y).
+    Mat4 r = {0};
+    r.m[0] = cy;
+    r.m[1] = 0.0f;
+    r.m[2] = -sy;
+    r.m[3] = 0.0f;
+
+    r.m[4] = -sy;
+    r.m[5] = 0.0f;
+    r.m[6] = -cy;
+    r.m[7] = 0.0f;
+
+    r.m[8] = 0.0f;
+    r.m[9] = -1.0f;
+    r.m[10] = 0.0f;
+    r.m[11] = 0.0f;
+
+    r.m[12] = pos.x;
+    r.m[13] = pos.y;
+    r.m[14] = pos.z;
+    r.m[15] = 1.0f;
+    return r;
+}
+
 static Mat4 mat4_look_at(Vec3 eye, Vec3 center, Vec3 up) {
     Vec3 f = {center.x - eye.x, center.y - eye.y, center.z - eye.z};
     float flen = sqrtf(f.x*f.x + f.y*f.y + f.z*f.z);
@@ -1411,7 +1443,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             g_player_pos,
             { 0.0f, g_cash_y_offset, 0.0f }
         );
-        Mat4 cash_model_m = mat4_from_pos_yaw(
+        Mat4 cash_model_m = mat4_from_pos_cash(
             center_pos,
             g_player_yaw + CASH_MODEL_YAW_OFFSET
         );
