@@ -3879,16 +3879,31 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
              * Matriz bind
              * --------------------------------------------------------
              */
+            const bool skin_frame_transpose =
+                (g_cash_skin_convention & 1) != 0;
+
             Mat4 bind_mat = mat4_identity();
-            bind_mat.m[0] = bone.rot_mat[0];
-            bind_mat.m[1] = bone.rot_mat[1];
-            bind_mat.m[2] = bone.rot_mat[2];
-            bind_mat.m[4] = bone.rot_mat[3];
-            bind_mat.m[5] = bone.rot_mat[4];
-            bind_mat.m[6] = bone.rot_mat[5];
-            bind_mat.m[8] = bone.rot_mat[6];
-            bind_mat.m[9] = bone.rot_mat[7];
-            bind_mat.m[10] = bone.rot_mat[8];
+            if (!skin_frame_transpose) {
+                bind_mat.m[0] = bone.rot_mat[0];
+                bind_mat.m[1] = bone.rot_mat[1];
+                bind_mat.m[2] = bone.rot_mat[2];
+                bind_mat.m[4] = bone.rot_mat[3];
+                bind_mat.m[5] = bone.rot_mat[4];
+                bind_mat.m[6] = bone.rot_mat[5];
+                bind_mat.m[8] = bone.rot_mat[6];
+                bind_mat.m[9] = bone.rot_mat[7];
+                bind_mat.m[10] = bone.rot_mat[8];
+            } else {
+                bind_mat.m[0] = bone.rot_mat[0];
+                bind_mat.m[1] = bone.rot_mat[3];
+                bind_mat.m[2] = bone.rot_mat[6];
+                bind_mat.m[4] = bone.rot_mat[1];
+                bind_mat.m[5] = bone.rot_mat[4];
+                bind_mat.m[6] = bone.rot_mat[7];
+                bind_mat.m[8] = bone.rot_mat[2];
+                bind_mat.m[9] = bone.rot_mat[5];
+                bind_mat.m[10] = bone.rot_mat[8];
+            }
             bind_mat.m[12] = bone.pos_x;
             bind_mat.m[13] = bone.pos_y;
             bind_mat.m[14] = bone.pos_z;
@@ -3938,37 +3953,46 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 bone.parent != 0xFFFFFFFF &&
                 bone.parent < bone_idx
             ) {
-                global_bones[bone_idx] = mat4_mul(
-                    global_bones[bone.parent],
-                    local_mat
-                );
+                if (g_cash_skin_convention & 2) {
+                    global_bones[bone_idx] = mat4_mul(
+                        local_mat,
+                        global_bones[bone.parent]
+                    );
+                } else {
+                    global_bones[bone_idx] = mat4_mul(
+                        global_bones[bone.parent],
+                        local_mat
+                    );
+                }
             } else {
                 global_bones[bone_idx] = local_mat;
             }
         }
 
         // ------------------------------------------------------------
-        // Construir la palette Skin.
-        //
-        // vertex.bone_indices usa índices LOCALES del Skin plugin.
-        // skin_bone_to_frame convierte esos índices al frame real del
-        // skeleton. La inverse-bind está en el mismo orden local de
-        // Skin, por eso cada entrada se combina con el frame indicado
-        // por la tabla de remapeo.
+        // Construir la palette Skin con la convención seleccionada.
         // ------------------------------------------------------------
         const size_t skin_bone_count =
             g_cash_model.inverse_bind_matrices.size() / 16;
 
-        // La prueba de palette identidad confirmó que los índices y
-        // pesos del Skin son correctos. Volvemos a la palette real para
-        // validar ahora FrameList + BoneRemapTable + inverse-bind.
-        constexpr bool DEBUG_IDENTITY_SKIN = false;
+        const bool skin_use_remap =
+            (g_cash_skin_convention & 4) != 0;
+        const bool skin_inv_transpose =
+            (g_cash_skin_convention & 8) != 0;
+        const bool skin_inv_first =
+            (g_cash_skin_convention & 16) != 0;
 
-        if (DEBUG_IDENTITY_SKIN) {
-            for (size_t i = 0; i < 96; ++i) {
-                skin_matrices[i] = mat4_identity();
-            }
-        }
+        auto transpose_skin_matrix =
+            [](const Mat4& src) -> Mat4 {
+                Mat4 dst = {0};
+                for (int row = 0; row < 4; ++row) {
+                    for (int col = 0; col < 4; ++col) {
+                        dst.m[col * 4 + row] =
+                            src.m[row * 4 + col];
+                    }
+                }
+                return dst;
+            };
 
         for (size_t skin_bone = 0;
              skin_bone < skin_bone_count &&
@@ -3976,10 +4000,13 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
              ++skin_bone) {
             size_t frame_index = skin_bone;
 
-            if (skin_bone <
+            if (skin_use_remap &&
+                skin_bone <
                 g_cash_model.skin_bone_to_frame.size()) {
                 frame_index =
-                    g_cash_model.skin_bone_to_frame[skin_bone];
+                    g_cash_model.skin_bone_to_frame[
+                        skin_bone
+                    ];
             }
 
             if (frame_index >= g_cash_model.bones.size() ||
@@ -3995,7 +4022,18 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                     ];
             }
 
-            if (!DEBUG_IDENTITY_SKIN) {
+            if (skin_inv_transpose) {
+                inverse_bind =
+                    transpose_skin_matrix(inverse_bind);
+            }
+
+            if (skin_inv_first) {
+                skin_matrices[skin_bone] =
+                    mat4_mul(
+                        inverse_bind,
+                        global_bones[frame_index]
+                    );
+            } else {
                 skin_matrices[skin_bone] =
                     mat4_mul(
                         global_bones[frame_index],
@@ -4004,48 +4042,54 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             }
         }
 
-        // En pose bind, cada globalBone * inverseBind debería ser
-        // aproximadamente identidad. Este diagnóstico no cambia la
-        // renderización y nos permite detectar un desajuste de convención.
-        if (!DEBUG_IDENTITY_SKIN && skin_bone_count > 0) {
+        // Imprime el error de la convención ya elegida.
+        if (skin_bone_count > 0 &&
+            g_cash_skin_convention >= 0) {
             float max_bind_error = 0.0f;
-            size_t worst_skin_bone = 0;
-            size_t worst_frame = 0;
+            float sum_bind_error = 0.0f;
+            size_t samples = 0;
 
             for (size_t skin_bone = 0;
                  skin_bone < skin_bone_count &&
                  skin_bone < 96;
                  ++skin_bone) {
-                size_t frame_index = skin_bone;
-                if (skin_bone <
-                    g_cash_model.skin_bone_to_frame.size()) {
-                    frame_index =
-                        g_cash_model.skin_bone_to_frame[skin_bone];
-                }
-                if (frame_index >= 96 ||
-                    frame_index >= g_cash_model.bones.size()) {
-                    continue;
+                float matrix_error = 0.0f;
+                for (int j = 0; j < 16; ++j) {
+                    const float target =
+                        (j == 0 || j == 5 ||
+                         j == 10 || j == 15)
+                        ? 1.0f : 0.0f;
+
+                    matrix_error += fabsf(
+                        skin_matrices[skin_bone].m[j] -
+                        target
+                    );
                 }
 
-                const Mat4 ident = mat4_identity();
-                for (int j = 0; j < 16; ++j) {
-                    const float err =
-                        fabsf(skin_matrices[skin_bone].m[j] -
-                              ident.m[j]);
-                    if (err > max_bind_error) {
-                        max_bind_error = err;
-                        worst_skin_bone = skin_bone;
-                        worst_frame = frame_index;
-                    }
-                }
+                sum_bind_error += matrix_error;
+                max_bind_error =
+                    std::max(
+                        max_bind_error,
+                        matrix_error
+                    );
+                ++samples;
             }
 
-            LOGI(
-                "SKIN BIND CHECK: maxError=%.6f skinBone=%zu frame=%zu",
-                max_bind_error,
-                worst_skin_bone,
-                worst_frame
-            );
+            static bool logged_bind_check = false;
+            if (!logged_bind_check) {
+                LOGI(
+                    "SKIN SELECTED CHECK: avg=%.6f max=%.6f "
+                    "samples=%zu mode=%d",
+                    samples
+                        ? sum_bind_error /
+                          static_cast<float>(samples)
+                        : 0.0f,
+                    max_bind_error,
+                    samples,
+                    g_cash_skin_convention
+                );
+                logged_bind_check = true;
+            }
         }
 
         Vec3 center_pos = vec3_add(
