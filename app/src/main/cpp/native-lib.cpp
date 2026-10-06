@@ -763,6 +763,8 @@ static float g_touch_sensitivity = 1.0f;
 
 static float g_move_fwd   = 0.f;  // -1..1  (adelante/atrás)
 static float g_move_right = 0.f;  // -1..1  (izquierda/derecha)
+static bool g_sprint_pressed = false;
+static bool g_sneak_pressed = false;
 
 // Física / colisión
 static float  g_vel_y    = 0.f;
@@ -940,7 +942,11 @@ static float locomotion_root_motion_speed(
             : (local_right >= 0.0f ? "Right" : "Left");
 
     const char* family = nullptr;
-    if (animation_input >=
+    if (g_sprint_pressed) {
+        family = "Sprint_";
+    } else if (g_sneak_pressed) {
+        family = "Sneak_Walk_";
+    } else if (animation_input >=
         std::max(g_player_control.move_run_threshold,
                  g_player_control.run_threshold)) {
         family = "Run_";
@@ -961,7 +967,11 @@ static float locomotion_root_motion_speed(
     // original de la animación. La mayoría valen 1.0; Sneak_Walk es 1.2.
     float speed_multiplier = 1.0f;
     if (family == std::string("Sneak_Walk_")) {
-        speed_multiplier = g_player_control.sneak_walk_speed;
+        speed_multiplier = g_sneak_pressed
+            ? g_player_control.sneak_run_speed
+            : g_player_control.sneak_walk_speed;
+    } else if (family == std::string("Sprint_")) {
+        speed_multiplier = g_player_control.sprint_speed;
     } else if (family == std::string("Walk_")) {
         speed_multiplier = g_player_control.walk_speed;
     } else if (family == std::string("Run_")) {
@@ -3653,9 +3663,16 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                     ? (direction_fwd >= 0.0f ? "Fwd" : "Bkw")
                     : (direction_right >= 0.0f ? "Right" : "Left");
 
-            // Tres zonas de intensidad: Sneak -> Walk -> Run.
+            // Estados de movimiento del PC:
+            // Shift fuerza Sprint, mientras Ctrl fuerza Sneak.
+            // Si ninguno está pulsado, se mantienen las tres zonas
+            // originales determinadas por la intensidad del movimiento.
             const char* family = nullptr;
-            if (animation_input >=
+            if (g_sprint_pressed && animation_input > 0.01f) {
+                family = "Sprint_";
+            } else if (g_sneak_pressed && animation_input > 0.01f) {
+                family = "Sneak_Walk_";
+            } else if (animation_input >=
                     std::max(g_player_control.move_run_threshold,
                              g_player_control.run_threshold)) {
                 family = "Run_";
@@ -4484,6 +4501,16 @@ JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeMove(JNIEnv*, jobject, jfloat fwd, jfloat right) {
     g_move_fwd   = fwd;
     g_move_right = right;
+}
+
+JNIEXPORT void JNICALL
+Java_com_manhunt_port_ManhuntRenderer_nativeSetSprint(JNIEnv*, jobject, jboolean pressed) {
+    g_sprint_pressed = pressed;
+}
+
+JNIEXPORT void JNICALL
+Java_com_manhunt_port_ManhuntRenderer_nativeSetSneak(JNIEnv*, jobject, jboolean pressed) {
+    g_sneak_pressed = pressed;
 }
 
 // Arrastrar para mirar (lado derecho de pantalla).
