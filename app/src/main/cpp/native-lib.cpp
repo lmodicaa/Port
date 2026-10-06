@@ -3137,10 +3137,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                         )
                     );
 
-                    // Para la cámara ignoramos suelo/techo: lo que nos
-                    // importa aquí son las superficies que realmente
-                    // pueden ocultar al personaje desde atrás.
-                    if (fabsf(n.y) > 0.70f) continue;
+                    // La cámara también debe respetar suelo y techo.
+                    // No descartamos superficies horizontales: al mirar
+                    // arriba/abajo el segmento de cámara puede intersectarlos.
 
                     float hit_t = 0.0f;
                     if (segment_intersects_triangle(
@@ -4149,7 +4148,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
     g_player_yaw -= dx * SENS;
     g_cam_yaw = g_player_yaw;
 
-    g_cam_pitch -= dy * SENS;
+    g_cam_pitch += dy * SENS;
     g_cam_pitch = std::max(-1.0f, std::min(1.0f, g_cam_pitch));
 }
 
