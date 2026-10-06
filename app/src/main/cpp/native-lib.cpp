@@ -136,6 +136,14 @@ static Mat4 mat4_from_pos_cash(Vec3 pos, float yaw) {
     return r;
 }
 
+static Vec3 mat4_transform_point(const Mat4& m, Vec3 p) {
+    return {
+        m.m[0] * p.x + m.m[4] * p.y + m.m[8]  * p.z + m.m[12],
+        m.m[1] * p.x + m.m[5] * p.y + m.m[9]  * p.z + m.m[13],
+        m.m[2] * p.x + m.m[6] * p.y + m.m[10] * p.z + m.m[14]
+    };
+}
+
 static Mat4 mat4_look_at(Vec3 eye, Vec3 center, Vec3 up) {
     Vec3 f = {center.x - eye.x, center.y - eye.y, center.z - eye.z};
     float flen = sqrtf(f.x*f.x + f.y*f.y + f.z*f.z);
