@@ -1478,12 +1478,16 @@ static bool player_collision_at(
     float px,
     float,
     float pz,
-    Vec3* out_normal = nullptr
+    Vec3* out_normal = nullptr,
+    float* out_penetration = nullptr
 ) {
     if (!g_player_col_model) return false;
 
     if (out_normal) {
         *out_normal = {0.0f, 0.0f, 0.0f};
+    }
+    if (out_penetration) {
+        *out_penetration = 0.0f;
     }
 
     const float yaw_c = cosf(g_player_yaw);
@@ -1540,23 +1544,30 @@ static bool player_collision_at(
         )
     );
 
-    const auto set_triangle_normal = [&](Vec3 n, Vec3 sample) {
-        if (!out_normal) return;
+    const auto set_triangle_contact = [&](Vec3 n, Vec3 sample, float penetration) {
+        if (out_normal) {
+            if (vec3_dot(
+                    {
+                        sample.x,
+                        sample.y,
+                        sample.z
+                    },
+                    n
+                ) < 0.0f) {
+                n.x = -n.x;
+                n.y = -n.y;
+                n.z = -n.z;
+            }
 
-        if (vec3_dot(
-                {
-                    sample.x,
-                    sample.y,
-                    sample.z
-                },
-                n
-            ) < 0.0f) {
-            n.x = -n.x;
-            n.y = -n.y;
-            n.z = -n.z;
+            *out_normal = vec3_norm(n);
         }
 
-        *out_normal = vec3_norm(n);
+        if (out_penetration) {
+            *out_penetration = std::max(
+                *out_penetration,
+                penetration
+            );
+        }
     };
 
     for (int cx = center_cx - cell_radius;
@@ -1604,13 +1615,17 @@ static bool player_collision_at(
 
                     const float r = player_radii[i];
                     if (dist_sq <= r * r) {
-                        set_triangle_normal(
+                        const float distance = sqrtf(
+                            std::max(0.0f, dist_sq)
+                        );
+                        set_triangle_contact(
                             n,
                             {
                                 player_centers[i].x - tri.a.x,
                                 player_centers[i].y - tri.a.y,
                                 player_centers[i].z - tri.a.z
-                            }
+                            },
+                            std::max(0.0f, r - distance)
                         );
                         return true;
                     }
@@ -1630,7 +1645,7 @@ static bool player_collision_at(
                             tri,
                             hit_t
                         )) {
-                        set_triangle_normal(
+                        set_triangle_contact(
                             n,
                             {
                                 line_a.x - tri.a.x,
@@ -1658,21 +1673,31 @@ static bool player_collision_at(
                 player_radii[i] + object_sphere.second;
 
             if (vec3_dot(d, d) <= radius * radius) {
+                const float distance = sqrtf(
+                    std::max(0.0f, vec3_dot(d, d))
+                );
+
                 if (out_normal) {
                     Vec3 n = d;
-                    const float len =
-                        sqrtf(vec3_dot(n, n));
 
-                    if (len > 1e-6f) {
-                        n.x /= len;
-                        n.y /= len;
-                        n.z /= len;
+                    if (distance > 1e-6f) {
+                        n.x /= distance;
+                        n.y /= distance;
+                        n.z /= distance;
                     } else {
                         n = {1.0f, 0.0f, 0.0f};
                     }
 
                     *out_normal = n;
                 }
+
+                if (out_penetration) {
+                    *out_penetration = std::max(
+                        *out_penetration,
+                        std::max(0.0f, radius - distance)
+                    );
+                }
+
                 return true;
             }
         }
@@ -1717,6 +1742,10 @@ static bool player_collision_at(
                 max_radius + object_sphere.second;
 
             if (vec3_dot(d, d) <= radius * radius) {
+                const float distance = sqrtf(
+                    std::max(0.0f, vec3_dot(d, d))
+                );
+
                 if (out_normal) {
                     // Normal desde la superficie del objeto hacia
                     // la parte del jugador que hizo contacto.
@@ -1726,25 +1755,116 @@ static bool player_collision_at(
                         closest.z - object_sphere.first.z
                     };
 
-                    const float len =
-                        sqrtf(vec3_dot(n, n));
-
-                    if (len > 1e-6f) {
-                        n.x /= len;
-                        n.y /= len;
-                        n.z /= len;
+                    if (distance > 1e-6f) {
+                        n.x /= distance;
+                        n.y /= distance;
+                        n.z /= distance;
                     } else {
                         n = {1.0f, 0.0f, 0.0f};
                     }
 
                     *out_normal = n;
                 }
+
+                if (out_penetration) {
+                    *out_penetration = std::max(
+                        *out_penetration,
+                        std::max(0.0f, radius - distance)
+                    );
+                }
+
                 return true;
             }
         }
     }
 
     return false;
+}
+
+static void recover_player_penetration() {
+    if (!g_player_col_model) return;
+
+    for (int iteration = 0; iteration < 3; ++iteration) {
+        Vec3 normal{};
+        float penetration = 0.0f;
+
+        if (!player_collision_at(
+                g_player_pos.x,
+                g_player_pos.y + 1.0f,
+                g_player_pos.z,
+                &normal,
+                &penetration
+            )) {
+            return;
+        }
+
+        // El contacto exacto no es una penetración y no debe producir
+        // jitter contra paredes.
+        if (penetration <= 0.02f) {
+            return;
+        }
+
+        Vec3 horizontal_normal = {
+            normal.x,
+            0.0f,
+            normal.z
+        };
+
+        const float len = sqrtf(
+            horizontal_normal.x * horizontal_normal.x +
+            horizontal_normal.z * horizontal_normal.z
+        );
+
+        if (len < 1e-5f) {
+            return;
+        }
+
+        horizontal_normal.x /= len;
+        horizontal_normal.z /= len;
+
+        const float push = penetration + 0.03f;
+
+        // La orientación de los triángulos del BSP no es fiable, así que
+        // probamos ambos sentidos y elegimos el que realmente libera al
+        // actor. Esto cubre paredes donde el jugador ya quedó parcialmente
+        // dentro y también esquinas.
+        const float candidates[2][2] = {
+            {
+                horizontal_normal.x * push,
+                horizontal_normal.z * push
+            },
+            {
+                -horizontal_normal.x * push,
+                -horizontal_normal.z * push
+            }
+        };
+
+        bool recovered = false;
+
+        for (const auto& candidate : candidates) {
+            const float x = g_player_pos.x + candidate[0];
+            const float z = g_player_pos.z + candidate[1];
+
+            float remaining_penetration = 0.0f;
+            if (!player_collision_at(
+                    x,
+                    g_player_pos.y + 1.0f,
+                    z,
+                    nullptr,
+                    &remaining_penetration
+                ) ||
+                remaining_penetration < penetration * 0.25f) {
+                g_player_pos.x = x;
+                g_player_pos.z = z;
+                recovered = true;
+                break;
+            }
+        }
+
+        if (!recovered) {
+            return;
+        }
+    }
 }
 
 static bool hit_wall(
@@ -2151,6 +2271,11 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     last_ns = now_ns;
 
     // ── Física y movimiento ────────────────────────────────────────────────
+    // Si por un borde o un contacto anterior el actor quedó parcialmente
+    // dentro de una pared, primero lo sacamos antes de procesar el nuevo
+    // desplazamiento. El contacto exacto (penetración <= 0.02) se conserva.
+    recover_player_penetration();
+
     float cam_cy = cosf(g_cam_yaw), cam_sy = sinf(g_cam_yaw);
     Vec3 fwd_xz   = {-cam_sy, 0, -cam_cy};
     Vec3 right_xz = { cam_cy, 0, -cam_sy};
