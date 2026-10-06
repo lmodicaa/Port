@@ -2727,7 +2727,8 @@ static void setup_model() {
         for (const auto& pair : g_anims) {
             LOGI(" - %s", pair.first.c_str());
         }
-        rebuild_debug_animation_list();\n        dump_turn_animation_data();
+        rebuild_debug_animation_list();
+        dump_turn_animation_data();
     } else {
         g_anims.clear();
         g_debug_anim_list.clear();
