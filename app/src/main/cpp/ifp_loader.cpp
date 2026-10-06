@@ -260,23 +260,15 @@ static AnimationTrack readTrack(Reader2& reader)
 
     if (frameType == 3) {
 
-        // FrameType 3 stores a constant initial direction quaternion.
-        initialQx = decodeQuat(reader.i16());
-        initialQy = decodeQuat(reader.i16());
-        initialQz = decodeQuat(reader.i16());
-        initialQw = decodeQuat(reader.i16());
+        // FrameType 3 stores a constant direction quaternion.
+        // Manhunt stores its four components using the 2048 scale.
+        initialQx = static_cast<float>(reader.i16()) / 2048.0f;
+        initialQy = static_cast<float>(reader.i16()) / 2048.0f;
+        initialQz = static_cast<float>(reader.i16()) / 2048.0f;
+        initialQw = static_cast<float>(reader.i16()) / 2048.0f;
 
-        // When StartTime > 0 the format contains one additional
-        // 16-bit value before the initialization position.
-        if (startTime > 0) {
-            (void)reader.u16();
-        }
-
-        // FrameType 3 also stores an initialization position before
-        // the per-frame translations.
-        track.initial_tx = decodeTranslation(reader.i16());
-        track.initial_ty = decodeTranslation(reader.i16());
-        track.initial_tz = decodeTranslation(reader.i16());
+        // There is NO initialization position here.
+        // The following bytes belong to the frame timing/data.
 
     } else {
 
@@ -392,12 +384,6 @@ static AnimationTrack readTrack(Reader2& reader)
                 keyframe.ty,
                 keyframe.tz
             );
-
-            // The initialization position is the sequence's
-            // base position for translation-only tracks.
-            keyframe.tx += track.initial_tx;
-            keyframe.ty += track.initial_ty;
-            keyframe.tz += track.initial_tz;
 
         } else {
 
