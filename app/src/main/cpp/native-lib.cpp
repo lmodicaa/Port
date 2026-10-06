@@ -1591,10 +1591,12 @@ static bool player_collision_at(
 
             if (vec3_dot(d, d) <= radius * radius) {
                 if (out_normal) {
+                    // Normal desde la superficie del objeto hacia
+                    // la parte del jugador que hizo contacto.
                     Vec3 n = {
-                        object_sphere.first.x - closest.x,
-                        object_sphere.first.y - closest.y,
-                        object_sphere.first.z - closest.z
+                        closest.x - object_sphere.first.x,
+                        closest.y - object_sphere.first.y,
+                        closest.z - object_sphere.first.z
                     };
 
                     const float len =
