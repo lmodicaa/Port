@@ -2653,11 +2653,141 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     }
 
     // ── Cámara Orbit ───────────────────────────────────────────────────────
+    const Vec3 target = {
+        g_player_pos.x,
+        g_player_pos.y + 1.5f,
+        g_player_pos.z
+    };
+
     Vec3 cam_pos;
-    cam_pos.x = g_player_pos.x + sinf(g_cam_yaw) * cosf(g_cam_pitch) * g_cam_dist;
-    cam_pos.y = g_player_pos.y + 1.5f - sinf(g_cam_pitch) * g_cam_dist;
-    cam_pos.z = g_player_pos.z + cosf(g_cam_yaw) * cosf(g_cam_pitch) * g_cam_dist;
-    Vec3 target = {g_player_pos.x, g_player_pos.y + 1.5f, g_player_pos.z};
+    cam_pos.x =
+        g_player_pos.x +
+        sinf(g_cam_yaw) *
+        cosf(g_cam_pitch) *
+        g_cam_dist;
+    cam_pos.y =
+        g_player_pos.y +
+        1.5f -
+        sinf(g_cam_pitch) *
+        g_cam_dist;
+    cam_pos.z =
+        g_player_pos.z +
+        cosf(g_cam_yaw) *
+        cosf(g_cam_pitch) *
+        g_cam_dist;
+
+    // Cámara de tercera persona: si una pared queda entre Cash y la
+    // posición deseada de la cámara, acercamos la cámara al jugador en
+    // vez de permitir que atraviese la geometría.
+    {
+        const Vec3 camera_delta = {
+            cam_pos.x - target.x,
+            cam_pos.y - target.y,
+            cam_pos.z - target.z
+        };
+
+        float nearest_t = 1.0f;
+        const std::vector<Tri>* camera_tris =
+            g_col_grid.get(target.x, target.z);
+
+        // La cámara puede cruzar celdas durante el trayecto. Recorremos
+        // una región basada en su longitud para no depender solo de la
+        // celda donde está el jugador.
+        const float horizontal_length = sqrtf(
+            camera_delta.x * camera_delta.x +
+            camera_delta.z * camera_delta.z
+        );
+        const int camera_cell_radius =
+            std::max(
+                1,
+                static_cast<int>(
+                    std::ceil(
+                        horizontal_length /
+                        g_col_grid.cell_size
+                    )
+                )
+            );
+
+        const int target_cx = static_cast<int>(
+            std::floor(target.x / g_col_grid.cell_size)
+        );
+        const int target_cz = static_cast<int>(
+            std::floor(target.z / g_col_grid.cell_size)
+        );
+
+        for (int cx = target_cx - camera_cell_radius;
+             cx <= target_cx + camera_cell_radius;
+             ++cx) {
+            for (int cz = target_cz - camera_cell_radius;
+                 cz <= target_cz + camera_cell_radius;
+                 ++cz) {
+                const auto it =
+                    g_col_grid.cells.find({cx, cz});
+                if (it == g_col_grid.cells.end()) continue;
+
+                for (const auto& tri : it->second) {
+                    Vec3 n = vec3_norm(
+                        vec3_cross(
+                            {
+                                tri.b.x - tri.a.x,
+                                tri.b.y - tri.a.y,
+                                tri.b.z - tri.a.z
+                            },
+                            {
+                                tri.c.x - tri.a.x,
+                                tri.c.y - tri.a.y,
+                                tri.c.z - tri.a.z
+                            }
+                        )
+                    );
+
+                    // Para la cámara ignoramos suelo/techo: lo que nos
+                    // importa aquí son las superficies que realmente
+                    // pueden ocultar al personaje desde atrás.
+                    if (fabsf(n.y) > 0.70f) continue;
+
+                    float hit_t = 0.0f;
+                    if (segment_intersects_triangle(
+                            target,
+                            camera_delta,
+                            tri,
+                            hit_t
+                        ) &&
+                        hit_t >= 0.0f &&
+                        hit_t < nearest_t) {
+                        nearest_t = hit_t;
+                    }
+                }
+            }
+        }
+
+        if (nearest_t < 1.0f) {
+            // Dejamos una separación mínima para evitar que la cámara
+            // termine justo dentro de la pared por redondeo.
+            const float camera_wall_margin = 0.12f;
+            const float safe_t = std::max(
+                0.05f,
+                nearest_t - camera_wall_margin /
+                    std::max(
+                        0.001f,
+                        sqrtf(
+                            camera_delta.x * camera_delta.x +
+                            camera_delta.y * camera_delta.y +
+                            camera_delta.z * camera_delta.z
+                        )
+                    )
+            );
+
+            cam_pos.x =
+                target.x + camera_delta.x * safe_t;
+            cam_pos.y =
+                target.y + camera_delta.y * safe_t;
+            cam_pos.z =
+                target.z + camera_delta.z * safe_t;
+        }
+
+        (void)camera_tris;
+    }
 
     // ── Render ────────────────────────────────────────────────────────────
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
