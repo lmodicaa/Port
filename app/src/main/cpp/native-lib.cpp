@@ -149,6 +149,7 @@ static std::map<std::string, Animation> g_anims;
 // >=0 = índice dentro de g_debug_anim_list
 static int g_debug_anim_idx = -2;
 static std::vector<const Animation*> g_debug_anim_list;
+static bool g_cash_skinning_enabled = false;
 
 // Forward declaration: setup_model() may use this diagnostic helper.
 static void dump_cash_debug(const DFFModel& model);
@@ -430,27 +431,28 @@ void main() {
     if (u_has_tex == 1) {
         tex_color = texture(u_tex, v_uv);
     }
-    
-    vec4 base = tex_color * v_color * u_mat_color;
-    if(base.a < 0.1) discard;
-    
-    // Iluminacion
-    vec3 n = normalize(v_normal);
-    vec3 l = normalize(-u_light_dir);
-    float diff = max(dot(n, l), 0.0);
-    
-    vec3 ambient_light = u_world_ambient.rgb * u_mat_ambient;
-    vec3 diffuse_light = u_dir_ambient.rgb * diff * u_mat_diffuse;
-    
-    vec3 final_color = base.rgb * (ambient_light + diffuse_light);
-    
-    // Niebla negra (Manhunt usa oscuridad para esconder el mapa)
+
+    // Render estable: no usar todavía los datos de iluminación del BSP,
+    // porque el parser del RW_WORLD aún no está verificado.
+    vec4 base = tex_color * v_color;
+
+    if (base.a < 0.1) discard;
+
     float fog_start = 10.0;
     float fog_end = 45.0;
-    float fog_factor = clamp((fog_end - v_dist) / (fog_end - fog_start), 0.0, 1.0);
-    vec3 fog_color = vec3(0.0, 0.0, 0.0);
-    
-    frag_color = vec4(mix(fog_color, final_color, fog_factor), base.a);
+    float fog_factor = clamp(
+        (fog_end - v_dist) / (fog_end - fog_start),
+        0.0,
+        1.0
+    );
+
+    vec3 final_color = base.rgb;
+    vec3 fog_color = vec3(0.0);
+
+    frag_color = vec4(
+        mix(fog_color, final_color, fog_factor),
+        base.a
+    );
 })";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1420,16 +1422,20 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             GL_FALSE,
             cash_model_m.m
         );
+        // Skinning experimental: disabled by default until the
+        // Skin palette <-> HAnim mapping is proven against Cash.
         glUniform1i(
             loc_skinned,
-            1
+            g_cash_skinning_enabled ? 1 : 0
         );
-        glUniformMatrix4fv(
-            loc_bones,
-            96,
-            GL_FALSE,
-            skin_matrices[0].m
-        );
+        if (g_cash_skinning_enabled) {
+            glUniformMatrix4fv(
+                loc_bones,
+                96,
+                GL_FALSE,
+                skin_matrices[0].m
+            );
+        }
         glBindVertexArray(
             it_cash->second.vao
         );
