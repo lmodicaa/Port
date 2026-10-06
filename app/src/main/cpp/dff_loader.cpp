@@ -79,6 +79,7 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
             // Por eso primero guardamos el orden de nodos de la jerarquía y
             // después resolvemos nodeID -> FrameList index.
             std::vector<uint32_t> hanim_node_ids;
+            std::vector<uint32_t> hanim_node_flags;
 
             // Extensions
             for (uint32_t i = 0; i < frameCount; i++) {
@@ -108,9 +109,11 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                                 const uint32_t nodeId =
                                     r.read<uint32_t>();
                                 r.read<uint32_t>(); // nodeIndex: RW lo resuelve por ID
-                                r.read<uint32_t>(); // flags
+                                const uint32_t flags =
+                                    r.read<uint32_t>();
 
                                 hanim_node_ids.push_back(nodeId);
+                                hanim_node_flags.push_back(flags);
                             }
                         } else {
                             // HAnim Node individual del Frame.
@@ -133,9 +136,17 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
             model.skin_bone_to_frame.clear();
             model.skin_bone_to_frame.reserve(hanim_node_ids.size());
 
+            model.hanim_node_flags.clear();
+            model.hanim_node_flags.reserve(hanim_node_ids.size());
+
             size_t mapped_hanim_nodes = 0;
 
-            for (uint32_t nodeId : hanim_node_ids) {
+            for (size_t h = 0;
+                 h < hanim_node_ids.size();
+                 ++h) {
+                const uint32_t nodeId =
+                    hanim_node_ids[h];
+
                 size_t frame_index = SIZE_MAX;
 
                 for (size_t frame = 0;
@@ -147,17 +158,28 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                     }
                 }
 
-                if (frame_index != SIZE_MAX) {
+                if (frame_index != SIZE_MAX &&
+                    frame_index <= 0xFE) {
                     model.skin_bone_to_frame.push_back(
                         static_cast<uint8_t>(frame_index)
                     );
                     model.bone_id_to_index[nodeId] =
                         static_cast<uint32_t>(frame_index);
+                    model.hanim_node_flags.push_back(
+                        h < hanim_node_flags.size()
+                            ? hanim_node_flags[h]
+                            : 0u
+                    );
                     ++mapped_hanim_nodes;
                 } else {
-                    // Mantener la longitud de la tabla para conservar el
-                    // índice Skin, aunque este nodo no tenga Frame asociado.
+                    // Mantener el índice HAnim, pero marcar el Frame como
+                    // inválido. Conservamos también sus flags.
                     model.skin_bone_to_frame.push_back(0xFF);
+                    model.hanim_node_flags.push_back(
+                        h < hanim_node_flags.size()
+                            ? hanim_node_flags[h]
+                            : 0u
+                    );
                 }
             }
 
@@ -168,10 +190,11 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
             }
 
             LOGI(
-                "FrameList: %u frames, HAnim nodes=%zu mapped=%zu",
+                "FrameList: %u frames, HAnim nodes=%zu mapped=%zu flags=%zu",
                 frameCount,
                 hanim_node_ids.size(),
-                mapped_hanim_nodes
+                mapped_hanim_nodes,
+                model.hanim_node_flags.size()
             );
             
             r.pos = frame_end;
