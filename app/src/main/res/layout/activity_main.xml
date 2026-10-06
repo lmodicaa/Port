@@ -25,16 +25,6 @@
         android:layout_marginEnd="64dp">
 
         <Button
-            android:id="@+id/btn_action"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:text="Anim"
-            android:background="#80000000"
-            android:textColor="#FFFFFF" />
-
-        <Space android:layout_width="1dp" android:layout_height="16dp" />
-
-        <Button
             android:id="@+id/btn_jump"
             android:layout_width="80dp"
             android:layout_height="80dp"
@@ -64,6 +54,20 @@
             android:textStyle="bold"
             android:textSize="18sp"
             android:paddingBottom="6dp" />
+
+        <TextView
+            android:id="@+id/lbl_aim_sensitivity"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Sensibilidad táctil"
+            android:textColor="#FFFFFF" />
+
+        <SeekBar
+            android:id="@+id/seek_aim_sensitivity"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="30"
+            android:progress="14" />
 
         <TextView android:id="@+id/lbl_pos_x" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:text="Pos X: +0.00 m" />
         <SeekBar android:id="@+id/seek_pos_x" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="600" android:progress="300" />
