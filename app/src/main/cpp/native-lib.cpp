@@ -107,6 +107,8 @@ static Mat4 mat4_from_pos_yaw(Vec3 pos, float yaw) {
 }
 
 
+static DFFModel g_cash_model;
+
 static Vec3 mat4_transform_point(const Mat4& m, Vec3 p) {
     return {
         m.m[0] * p.x + m.m[4] * p.y + m.m[8]  * p.z + m.m[12],
@@ -315,7 +317,8 @@ static int    g_height            = 0;
 
 // Estado 3ra Persona
 static Vec3  g_player_pos = {0.f, -5.f, 0.f};
-static float g_cash_y_offset = 1.0f;
+// El offset vertical del modelo se calcula automáticamente contra el suelo.
+static float g_cash_y_offset = 0.0f;
 
 // El modelo Cash usa un eje frontal distinto al del runtime:
 // el frente del DFF debe girarse 90 grados para alinearlo con
@@ -356,7 +359,6 @@ static Mat4 mat4_rotate_z(float angle) {
     r.m[5] = c;
     return r;
 }
-static DFFModel g_cash_model;
 static float g_player_yaw = 0.0f;
 static float g_anim_time = 0.f;
 static float g_cam_yaw    = 0.0f;
@@ -497,8 +499,7 @@ void main() {
     v_uv = a_uv;
     v_color = a_color;
     v_dist = pos.w;
-    v_normal = normalize(mat3(u_model) * local_normal);
-})";
+    v_normal = normalize(mat3(u_model) * local_normal);})";
 
 // Fragment: texturas + colores de vértices + niebla negra (Manhunt style)
 static const char* FRAG_SRC = R"(#version 300 es
@@ -997,8 +998,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     if (hit_wall(g_player_pos.x, waist_y, g_player_pos.z, nx, waist_y, nz)) {
         if (!hit_wall(g_player_pos.x, waist_y, g_player_pos.z, nx, waist_y, g_player_pos.z)) {
             g_player_pos.x = nx;
-        } else if (!hit_wall(g_player_pos.x, waist_y, g_player_pos.z, g_player_pos.x, waist_y, nz)) {
-            g_player_pos.z = nz;
+        } else if (!hit_wall(g_player_pos.x, waist_y, g_player_pos.z, g_player_pos.x, waist_y, nz)) {            g_player_pos.z = nz;
         }
     } else {
         g_player_pos.x = nx;
@@ -1497,8 +1497,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
          * Render
          * --------------------------------------------------------
          */
-        // Rotación final de Cash. La altura se calcula automáticamente para
-        // apoyar la parte más baja del mesh sobre el piso del nivel.
+        // Rotación final de Cash. La altura se calcula automáticamente para        // apoyar la parte más baja del mesh sobre el piso del nivel.
         const float rx = g_cash_rot_adjust_deg.x * 0.017453292519943f;
         const float ry = g_cash_rot_adjust_deg.y * 0.017453292519943f;
         const float rz = g_cash_rot_adjust_deg.z * 0.017453292519943f;
