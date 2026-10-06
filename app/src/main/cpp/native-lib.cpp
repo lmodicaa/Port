@@ -2212,9 +2212,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         // "step-up": si en la posición deseada hay un suelo apenas más
         // alto que el actual, desplazamos al actor hasta esa cota y
         // dejamos que el resolvedor vertical siga controlando el resto.
-        //
-        // No usamos el modelo render ni una caja inventada: el suelo
-        // sigue viniendo de la geometría de colisión del nivel.
         const float current_floor = find_player_floor(
             g_player_pos.x,
             g_player_pos.y + 2.0f,
@@ -2252,6 +2249,8 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             horizontal_normal.z * horizontal_normal.z
         );
 
+        bool moved_by_slide = false;
+
         if (normal_len > 1e-5f) {
             horizontal_normal.x /= normal_len;
             horizontal_normal.z /= normal_len;
@@ -2287,7 +2286,57 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                     )) {
                     g_player_pos.x = slide_x;
                     g_player_pos.z = slide_z;
+                    moved_by_slide = true;
                 }
+            }
+        }
+
+        if (!moved_by_slide) {
+            // En esquinas, un único vector normal puede apuntar justo
+            // hacia la segunda pared y dejar al actor prácticamente
+            // inmóvil. Probamos las dos componentes cardinales del
+            // desplazamiento original por separado. Esto no atraviesa
+            // geometría porque cada destino se vuelve a comprobar con
+            // el COL completo del jugador.
+            const float candidates[4][2] = {
+                { step_dx, 0.0f },
+                { 0.0f, step_dz },
+                { step_dx * 0.5f, step_dz },
+                { step_dx, step_dz * 0.5f }
+            };
+
+            float best_dx = 0.0f;
+            float best_dz = 0.0f;
+            float best_len_sq = 0.0f;
+
+            for (const auto& candidate : candidates) {
+                const float candidate_x =
+                    g_player_pos.x + candidate[0];
+                const float candidate_z =
+                    g_player_pos.z + candidate[1];
+
+                if (player_collision_at(
+                        candidate_x,
+                        current_waist_y,
+                        candidate_z
+                    )) {
+                    continue;
+                }
+
+                const float len_sq =
+                    candidate[0] * candidate[0] +
+                    candidate[1] * candidate[1];
+
+                if (len_sq > best_len_sq) {
+                    best_len_sq = len_sq;
+                    best_dx = candidate[0];
+                    best_dz = candidate[1];
+                }
+            }
+
+            if (best_len_sq > 1e-8f) {
+                g_player_pos.x += best_dx;
+                g_player_pos.z += best_dz;
             }
         }
     }
