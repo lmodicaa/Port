@@ -3404,6 +3404,18 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         const size_t skin_bone_count =
             g_cash_model.inverse_bind_matrices.size() / 16;
 
+        // PRUEBA DIAGNÓSTICA:
+        // Con palette identidad, el shader sigue usando los índices/pesos
+        // reales del vértice pero ninguna transformación ósea. Si Cash se
+        // ve correcto así, la deformación está en global_bones/inverse-bind.
+        constexpr bool DEBUG_IDENTITY_SKIN = true;
+
+        if (DEBUG_IDENTITY_SKIN) {
+            for (size_t i = 0; i < 96; ++i) {
+                skin_matrices[i] = mat4_identity();
+            }
+        }
+
         for (size_t skin_bone = 0;
              skin_bone < skin_bone_count &&
              skin_bone < 96;
@@ -3429,11 +3441,13 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                     ];
             }
 
-            skin_matrices[skin_bone] =
-                mat4_mul(
-                    global_bones[frame_index],
-                    inverse_bind
-                );
+            if (!DEBUG_IDENTITY_SKIN) {
+                skin_matrices[skin_bone] =
+                    mat4_mul(
+                        global_bones[frame_index],
+                        inverse_bind
+                    );
+            }
         }
 
         /*
