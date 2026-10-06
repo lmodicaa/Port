@@ -3903,7 +3903,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     }
     
     // ── Skeletal Animation Update ─────────────────────────────────────────────
-    g_anim_time += dt;
     auto it_cash = g_model_render.find("cash");
     if (it_cash != g_model_render.end()) {
         Mat4 global_bones[96];
@@ -4110,6 +4109,18 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 );
             }
         }
+
+        // La velocidad de reproducción de la locomoción sigue la magnitud
+        // analógica del stick. Así, si el jugador avanza lentamente,
+        // la animación de Walk también avanza lentamente y los pies no
+        // se deslizan respecto al desplazamiento físico.
+        float animation_dt = dt;
+        if (anim &&
+            is_looping_locomotion_animation(anim) &&
+            input_strength > 0.01f) {
+            animation_dt *= input_strength;
+        }
+        g_anim_time += animation_dt;
 
         float animation_time = 0.0f;
         if (anim && anim->duration > 0.0f) {
