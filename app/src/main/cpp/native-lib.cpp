@@ -261,6 +261,11 @@ static int    g_height            = 0;
 // Estado 3ra Persona
 static Vec3  g_player_pos = {0.f, -5.f, 0.f};
 static float g_cash_y_offset = 1.0f;
+
+// El modelo Cash usa un eje frontal distinto al del runtime:
+// el frente del DFF debe girarse 90 grados para alinearlo con
+// el forward del jugador (-Z en yaw=0).
+static constexpr float CASH_MODEL_YAW_OFFSET = 1.57079632679f;
 static DFFModel g_cash_model;
 static float g_player_yaw = 0.0f;
 static float g_anim_time = 0.f;
@@ -1408,7 +1413,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         );
         Mat4 cash_model_m = mat4_from_pos_yaw(
             center_pos,
-            g_player_yaw
+            g_player_yaw + CASH_MODEL_YAW_OFFSET
         );
         Mat4 cash_mvp = mat4_mul(
             vp,
