@@ -1651,7 +1651,8 @@ static bool player_collision_at(
                                 line_a.x - tri.a.x,
                                 line_a.y - tri.a.y,
                                 line_a.z - tri.a.z
-                            }
+                            },
+                            0.0f
                         );
                         return true;
                     }
