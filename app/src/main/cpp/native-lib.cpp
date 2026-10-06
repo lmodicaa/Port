@@ -1026,8 +1026,10 @@ static float find_floor(float px, float search_y, float pz) {
         float nlen = sqrtf(n.x*n.x + n.y*n.y + n.z*n.z);
         if (nlen > 0.0f) { n.x/=nlen; n.y/=nlen; n.z/=nlen; }
         
-        // Si no mira hacia arriba (ej. pared o techo), ignorarlo como suelo
-        if (n.y < 0.3f) continue;
+        // El BSP de Manhunt puede contener triángulos con winding
+        // invertido. Para colisión vertical nos interesa la inclinación
+        // de la superficie, no la orientación de su winding.
+        if (fabsf(n.y) < 0.3f) continue;
         
         Vec3 h  = vec3_cross(ray_d, e2);
         float det = vec3_dot(e1, h);
@@ -1082,9 +1084,10 @@ static float find_ceiling(float px, float search_y, float pz) {
         n.y /= nlen;
         n.z /= nlen;
 
-        // Solo superficies orientadas hacia abajo pueden actuar como
-        // techo. Las paredes y el suelo quedan fuera.
-        if (n.y > -0.30f) continue;
+        // Igual que el raycast de suelo, no depender del winding del
+        // triángulo. El rayo hacia arriba descarta por sí mismo las
+        // superficies que quedan detrás del origen.
+        if (fabsf(n.y) < 0.30f) continue;
 
         const Vec3 h = vec3_cross(ray_d, e2);
         const float det = vec3_dot(e1, h);
