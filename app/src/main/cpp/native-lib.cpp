@@ -3733,9 +3733,12 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 const size_t frame_index =
                     static_cast<size_t>(frame_u8);
 
-                // Los nodos que no tienen track activo producen
-                // la identidad, igual que el InterpFrame inicial.
-                Mat4 anim_local = mat4_identity();
+                // Un nodo sin track NO es identidad: HAnim conserva
+                // su transformación local del FrameList. Usar identidad
+                // aquí rompe la cadena padre/hijo y provoca que partes del
+                // personaje parezcan flotar o "patinar".
+                Mat4 anim_local =
+                    bind_local_bones[frame_index];
 
                 if (frame_index <
                     g_cash_model.bones.size() &&
