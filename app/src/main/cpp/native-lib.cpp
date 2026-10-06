@@ -2694,13 +2694,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         vel_xz.x *= inv * input_strength;
         vel_xz.z *= inv * input_strength;
 
-        // El movimiento del personaje responde directamente al stick.
-        // MOVE_TRANS_SPEED no se aplica aquí: en Manhunt controla la
-        // transición entre animaciones, no la respuesta física.
-        g_player_yaw = atan2f(
-            -vel_xz.x,
-            -vel_xz.z
-        );
+        // No forzar el yaw hacia el stick: las animaciones Fwd/Bkw/Left/Right
+        // necesitan conservar la orientación actual del personaje.
+        // El giro se resolverá con los estados de giro de Manhunt.
     } else {
         vel_xz = {0.0f, 0.0f, 0.0f};
     }
@@ -3327,24 +3323,40 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 return nullptr;
             };
 
-            // Manhunt define tres zonas reales del stick:
-            //   0 .. MOVE_THRESHOLDS[0] = SNEAK
-            //   MOVE_THRESHOLDS[0] .. MOVE_THRESHOLDS[1] = WALK
-            //   MOVE_THRESHOLDS[1] .. 1 = RUN
-            //
-            // No convertimos la zona sneak en Walk_Fwd: el IFP contiene
-            // explícitamente las animaciones Sneak_Walk_*.
+            // La dirección es independiente de la intensidad.
+            // Manhunt tiene cuatro animaciones cardinales por familia.
+            const float player_cy = cosf(g_player_yaw);
+            const float player_sy = sinf(g_player_yaw);
+            const Vec3 player_fwd = {-player_sy, 0.0f, -player_cy};
+            const Vec3 player_right = {player_cy, 0.0f, -player_sy};
+
+            const float local_fwd =
+                vel_xz.x * player_fwd.x + vel_xz.z * player_fwd.z;
+            const float local_right =
+                vel_xz.x * player_right.x + vel_xz.z * player_right.z;
+
+            const bool use_forward_axis =
+                std::fabs(local_fwd) >= std::fabs(local_right);
+            const char* direction =
+                use_forward_axis
+                    ? (local_fwd >= 0.0f ? "Fwd" : "Bkw")
+                    : (local_right >= 0.0f ? "Right" : "Left");
+
+            // Tres zonas de intensidad: Sneak -> Walk -> Run.
+            const char* family = nullptr;
             if (animation_input >=
-                    std::max(
-                        g_player_control.move_run_threshold,
-                        g_player_control.run_threshold
-                    )) {
-                anim = find_anim("Run_Fwd");
-            } else if (animation_input >=
-                       g_player_control.move_walk_threshold) {
-                anim = find_anim("Walk_Fwd");
+                    std::max(g_player_control.move_run_threshold,
+                             g_player_control.run_threshold)) {
+                family = "Run_";
+            } else if (animation_input >= g_player_control.move_walk_threshold) {
+                family = "Walk_";
             } else if (animation_input > 0.01f) {
-                anim = find_anim("Sneak_Walk_Fwd");
+                family = "Sneak_Walk_";
+            }
+
+            if (family) {
+                std::string wanted = std::string(family) + direction;
+                anim = find_anim(wanted.c_str());
             } else {
                 anim = find_anim("Stand");
             }
