@@ -171,6 +171,7 @@ class MainActivity : Activity() {
             } else {
                 touchAimDistance = 60f - (percent * 0.54f)
             }
+            renderer.nativeSetTouchSensitivity(percent.toFloat())
             aimSensitivityLabel.text = "Sensibilidad táctil: $percent%"
         }
 
