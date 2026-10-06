@@ -4144,11 +4144,13 @@ JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jfloat dy) {
     const float SENS = 0.003f;
 
-    g_player_yaw += dx * SENS;
+    // Arrastrar hacia la derecha hace girar la cámara/personaje hacia
+    // la derecha; arrastrar hacia arriba hace mirar hacia arriba.
+    g_player_yaw -= dx * SENS;
     g_cam_yaw = g_player_yaw;
 
-    g_cam_pitch -= dy * SENS;
-    g_cam_pitch = std::max(-1.4f, std::min(1.4f, g_cam_pitch));
+    g_cam_pitch += dy * SENS;
+    g_cam_pitch = std::max(-1.0f, std::min(1.0f, g_cam_pitch));
 }
 
 // Siguiente animación de depuración.
