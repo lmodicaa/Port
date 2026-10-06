@@ -520,33 +520,40 @@ static void dump_turn_animation_data() {
         }
 
         const Animation& anim = it->second;
-        float min_yaw = 0.0f;
-        float max_yaw = 0.0f;
-        bool has_root_rotation = false;
+        const AnimationKeyframe* first_root = nullptr;
+        const AnimationKeyframe* last_root = nullptr;
 
         for (const auto& track : anim.tracks) {
             if (track.bone_id != 1000 || track.keyframes.empty()) continue;
-
-            for (const auto& key : track.keyframes) {
-                // Quaternion Y component is logged as a diagnostic only.
-                // No assumptions are made about the runtime turn angle yet.
-                min_yaw = has_root_rotation
-                    ? std::min(min_yaw, key.qy)
-                    : key.qy;
-                max_yaw = has_root_rotation
-                    ? std::max(max_yaw, key.qy)
-                    : key.qy;
-                has_root_rotation = true;
-            }
+            first_root = &track.keyframes.front();
+            last_root = &track.keyframes.back();
+            break;
         }
 
+        if (!first_root || !last_root) {
+            LOGI(
+                "TURN ANIM: %s duration=%.3f tracks=%zu ROOT=NO_ROTATION_TRACK",
+                anim.name.c_str(),
+                anim.duration,
+                anim.tracks.size()
+            );
+            continue;
+        }
+
+        const float first_yaw =
+            2.0f * atan2f(first_root->qy, first_root->qw);
+        const float last_yaw =
+            2.0f * atan2f(last_root->qy, last_root->qw);
+
         LOGI(
-            "TURN ANIM: %s duration=%.3f tracks=%zu root_qy=[%.4f,%.4f]",
+            "TURN ANIM: %s duration=%.3f root_q=[%.4f,%.4f,%.4f,%.4f]->[%.4f,%.4f,%.4f,%.4f] yaw=%.3f->%.3f delta=%.3f deg=%.1f",
             anim.name.c_str(),
             anim.duration,
-            anim.tracks.size(),
-            min_yaw,
-            max_yaw
+            first_root->qx, first_root->qy, first_root->qz, first_root->qw,
+            last_root->qx, last_root->qy, last_root->qz, last_root->qw,
+            first_yaw, last_yaw,
+            last_yaw - first_yaw,
+            (last_yaw - first_yaw) * 57.2957795f
         );
     }
 }
