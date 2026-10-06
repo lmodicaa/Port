@@ -3414,21 +3414,33 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         scaled_root_distance *= g_player_control.walk_speed;
     }
 
+    const bool special_motion_active =
+        g_locomotion_special_anim != nullptr;
+
     const float movement_speed =
         scaled_root_distance > 0.0001f
             ? scaled_root_distance / std::max(dt, 0.0001f)
-            : MOVE_SPEED_FALLBACK;
+            : 0.0f;
 
-    // Durante un skid no hay entrada actual; conservamos la última
-    // dirección del jugador para trasladar el actor junto con la frenada.
+    // Durante un skid o una transición de arranque no siempre hay una
+    // entrada nueva que deba definir la dirección. En reposo completo no
+    // aplicamos root-motion: Cash no puede avanzar solo.
     const Vec3 movement_dir =
-        currently_moving ? vel_xz : g_last_move_dir;
+        currently_moving ? vel_xz :
+        (special_motion_active ? g_last_move_dir :
+                                 Vec3{0.0f, 0.0f, 0.0f});
 
     // La locomoción Walk usa la velocidad completa de su animación.
     // La intensidad del stick solo determina si hay movimiento, no ralentiza
     // artificialmente el ciclo ni el desplazamiento del personaje.
-    const float move_dx = movement_dir.x * movement_speed * dt;
-    const float move_dz = movement_dir.z * movement_speed * dt;
+    const float move_dx =
+        special_motion_active || currently_moving
+            ? movement_dir.x * movement_speed * dt
+            : 0.0f;
+    const float move_dz =
+        special_motion_active || currently_moving
+            ? movement_dir.z * movement_speed * dt
+            : 0.0f;
 
     // Resolver el desplazamiento en pequeños pasos evita atravesar
     // superficies finas cuando un frame produce un movimiento grande.
