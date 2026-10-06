@@ -3984,11 +3984,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 float previous_time = g_previous_anim_time;
                 if (g_previous_anim->duration > 0.0f) {
                     const bool previous_loop =
-                        (g_debug_anim_idx == -2) ||
-                        g_previous_anim->name == "Stand_Idle" ||
-                        g_previous_anim->name == "Walk_Fwd" ||
-                        g_previous_anim->name == "Run_Fwd" ||
-                        g_previous_anim->name == "Sprint_Fwd";
+                        is_looping_locomotion_animation(
+                            g_previous_anim
+                        );
 
                     if (previous_loop) {
                         previous_time = fmodf(
