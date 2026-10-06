@@ -3193,7 +3193,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     // pequeñas diferencias entre los pasos y el desplazamiento del actor.
     Vec3 root_delta_local{};
     const bool have_root_delta =
-        locomotion_root_motion_delta(
+        animation_root_motion_delta(
             [&]() -> const Animation* {
                 const float local_fwd =
                     vel_xz.x * fwd_xz.x + vel_xz.z * fwd_xz.z;
