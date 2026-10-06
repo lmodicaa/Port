@@ -579,8 +579,10 @@ static void parse_entity_type_data(
 static std::string collision_data_for_instance(
     const EntityInst& inst
 ) {
+    // INST: el primer string es el glgRecord/archetype. Ese es el
+    // registro que se relaciona con RECORD ... en entityTypeData.ini.
     const std::string record =
-        normalize_col_name(inst.entity_class);
+        normalize_col_name(inst.name);
 
     if (!record.empty()) {
         const auto type_it =
@@ -592,8 +594,8 @@ static std::string collision_data_for_instance(
         }
     }
 
-    // Fallback only when the type-data file is unavailable or the
-    // instance has no matching archetype.
+    // Fallback al modelo solamente cuando no existe información de
+    // COLLISION_DATA para el archetype.
     return normalize_col_name(inst.model);
 }
 
@@ -648,7 +650,7 @@ static void rebuild_col_inst_collisions() {
 
         const bool used_type_data =
             g_entity_collision_data.find(
-                normalize_col_name(inst.entity_class)
+                normalize_col_name(inst.name)
             ) != g_entity_collision_data.end();
 
         const ColModel* col =
