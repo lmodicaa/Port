@@ -751,6 +751,11 @@ static float g_cam_yaw    = 0.0f;
 static float g_cam_pitch  = -0.2f;
 static float g_cam_dist   = 3.0f;
 
+// Giro visual solicitado por el control de apuntado.
+// La animación nunca modifica g_player_yaw: el giro físico del actor sigue
+// siendo independiente, como en el juego original.
+static int g_turn_anim_request = 0; // -1 izquierda, +1 derecha
+
 // Movimiento joystick (actualizados desde Kotlin)
 static float g_move_fwd   = 0.f;  // -1..1  (adelante/atrás)
 static float g_move_right = 0.f;  // -1..1  (izquierda/derecha)
@@ -3572,7 +3577,20 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 std::string wanted = std::string(family) + direction;
                 anim = find_anim(wanted.c_str());
             } else {
-                anim = find_anim("Stand");
+                // Sin desplazamiento, el giro horizontal del apuntado usa
+                // las animaciones originales de giro en parado.
+                if (g_turn_anim_request != 0) {
+                    anim = find_anim(
+                        g_turn_anim_request > 0
+                            ? "Stand_Turn_Right"
+                            : "Stand_Turn_Left"
+                    );
+                    g_turn_anim_request = 0;
+                }
+
+                if (!anim) {
+                    anim = find_anim("Stand");
+                }
             }
 
             if (!anim) {
@@ -4384,6 +4402,13 @@ Java_com_manhunt_port_ManhuntRenderer_nativeMove(JNIEnv*, jobject, jfloat fwd, j
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jfloat dy) {
     const float SENS = 0.003f;
+
+    // El arrastre horizontal también alimenta el estado visual de giro.
+    // No usamos la animación para calcular el yaw: solo reproduce la pose
+    // original correspondiente al sentido del giro.
+    if (std::fabs(dx) > 0.5f) {
+        g_turn_anim_request = (dx > 0.0f) ? 1 : -1;
+    }
 
     // Arrastrar hacia la derecha hace girar la cámara/personaje hacia
     // la derecha; arrastrar hacia arriba hace mirar hacia arriba.
