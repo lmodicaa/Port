@@ -502,7 +502,7 @@ static float g_cash_y_offset = 1.0f;
 // el frente del DFF debe girarse 90 grados para alinearlo con
 // el forward del jugador (-Z en yaw=0).
 static constexpr float CASH_MODEL_YAW_OFFSET = -1.57079632679f;
-static Vec3 g_cash_pos_adjust = {0.0f, 1.0f, 0.0f};
+static Vec3 g_cash_pos_adjust = {0.0f, 0.0f, 0.0f};
 static Vec3 g_cash_rot_adjust_deg = {0.0f, -91.0f, 180.0f};
 
 static Mat4 mat4_rotate_x(float angle) {
@@ -537,6 +537,7 @@ static Mat4 mat4_rotate_z(float angle) {
 static DFFModel g_cash_model;
 static float g_player_yaw = 0.0f;
 static float g_anim_time = 0.f;
+static std::string g_last_played_anim;
 static float g_cam_yaw    = 0.0f;
 static float g_cam_pitch  = -0.2f;
 static float g_cam_dist   = 3.0f;
@@ -3283,12 +3284,35 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
          */
         float animation_time = 0.0f;
         if (anim && anim->duration > 0.0f) {
-            animation_time = fmodf(
-                g_anim_time,
-                anim->duration
-            );
-            if (animation_time < 0.0f)
-                animation_time += anim->duration;
+            // Al cambiar de animación empezamos desde su primer frame.
+            // Esto evita que Walk/Run/Idle entren a mitad de una pose.
+            if (g_last_played_anim != anim->name) {
+                g_last_played_anim = anim->name;
+                g_anim_time = 0.0f;
+            }
+
+            // Locomoción e idle son cíclicos. Las animaciones de depuración
+            // se reproducen una sola vez para poder verlas completas.
+            const bool loop_animation =
+                (g_debug_anim_idx == -2) ||
+                anim->name == "Stand_Idle" ||
+                anim->name == "Walk_Fwd" ||
+                anim->name == "Run_Fwd" ||
+                anim->name == "Sprint_Fwd";
+
+            if (loop_animation) {
+                animation_time = fmodf(
+                    g_anim_time,
+                    anim->duration
+                );
+                if (animation_time < 0.0f)
+                    animation_time += anim->duration;
+            } else {
+                animation_time = std::min(
+                    g_anim_time,
+                    anim->duration
+                );
+            }
         }
         // Skin usa el orden HAnim y la fórmula de RenderWare/librw:
         // inverseAtomic * hierarchyMatrix * inverseBind.
@@ -3460,9 +3484,21 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                     const float anim_tz =
                         k0->tz + t * (k1->tz - k0->tz);
 
-                    pos[0] = bone.pos_x + anim_tx;
+                    // El movimiento horizontal del actor ya se aplica
+                    // mediante g_player_pos. El track raíz también contiene
+                    // desplazamiento, pero aplicarlo aquí por segunda vez
+                    // produce "patinaje": los pies se mueven dentro del lugar
+                    // mientras el cuerpo se desplaza con el joystick.
+                    const bool root_motion_track =
+                        bone.bone_id == 1000;
+
+                    pos[0] =
+                        bone.pos_x +
+                        (root_motion_track ? 0.0f : anim_tx);
                     pos[1] = bone.pos_y + anim_ty;
-                    pos[2] = bone.pos_z + anim_tz;
+                    pos[2] =
+                        bone.pos_z +
+                        (root_motion_track ? 0.0f : anim_tz);
                     /*
                      * Debug solamente para algunos huesos.
                      */
