@@ -112,7 +112,7 @@ class MainActivity : Activity() {
                             }
                             rightPointerId -> {
                                 rightPointerId = -1
-                                renderer.nativeLook(0f, 0f)
+                                renderer.nativeLook(0f, 0f, true)
                             }
                         }
                     }
