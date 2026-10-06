@@ -147,7 +147,7 @@ static std::map<std::string, Animation> g_anims;
 // -2 = modo automático según movimiento
 // -1 = bind pose (sin IFP)
 // >=0 = índice dentro de g_debug_anim_list
-static int g_debug_anim_idx = -2;
+static int g_debug_anim_idx = -1;
 static std::vector<const Animation*> g_debug_anim_list;
 static bool g_cash_skinning_enabled = false;
 
@@ -837,6 +837,10 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     g_on_ground = false;
     g_move_fwd  = 0.f;
     g_move_right= 0.f;
+    // Arrancar en bind pose: ninguna animación experimental puede
+    // deformar el modelo al iniciar la aplicación.
+    g_debug_anim_idx = -1;
+    g_cash_skinning_enabled = false;
 }
 
 JNIEXPORT void JNICALL
