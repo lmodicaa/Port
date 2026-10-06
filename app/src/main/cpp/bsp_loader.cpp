@@ -1,0 +1,207 @@
+#include "dff_loader.h"
+#include <string>
+#include <cmath>
+#include <android/log.h>
+
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "ManhuntBSP", __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "ManhuntBSP", __VA_ARGS__)
+
+struct ChunkHeader {
+    uint32_t type;
+    uint32_t size;
+    uint32_t version;
+};
+
+class BSPReader {
+public:
+    const uint8_t* base;
+    size_t pos;
+    size_t max_size;
+
+    BSPReader(const uint8_t* d, size_t s) : base(d), pos(0), max_size(s) {}
+
+    template<typename T>
+    T read() {
+        if (pos + sizeof(T) > max_size) return T();
+        T val = *reinterpret_cast<const T*>(base + pos);
+        pos += sizeof(T);
+        return val;
+    }
+
+    ChunkHeader read_chunk() {
+        ChunkHeader h;
+        h.type = read<uint32_t>();
+        h.size = read<uint32_t>();
+        h.version = read<uint32_t>();
+        return h;
+    }
+
+    void skip(size_t bytes) {
+        pos += bytes;
+    }
+};
+
+DFFModel bsp_load(const uint8_t* data, size_t size) {
+    DFFModel model;
+    BSPReader r(data, size);
+
+    ChunkHeader root = r.read_chunk();
+    if (root.type != 0x000B) { // RW_WORLD
+        LOGE("No es un archivo BSP/World (tipo=0x%04X)", root.type);
+        return model;
+    }
+
+    size_t root_end = r.pos + root.size;
+    
+    // El primer hijo de RW_WORLD es RW_STRUCT
+    ChunkHeader ws_hdr = r.read_chunk();
+    if (ws_hdr.type != 0x0001) return model;
+    
+    // Leer flags (offset 36 en el struct, índice 9)
+    r.skip(36);
+    uint32_t world_format = r.read<uint32_t>();
+    r.skip(ws_hdr.size - 40); // Saltar el resto del struct (bbox, etc)
+
+    // El segundo hijo de RW_WORLD es RW_MATERIAL_LIST
+    ChunkHeader ml_hdr = r.read_chunk();
+    if (ml_hdr.type == 0x0008) {
+        size_t ml_end = r.pos + ml_hdr.size;
+        ChunkHeader ml_struct = r.read_chunk();
+        uint32_t numMaterials = r.read<uint32_t>();
+        r.skip(ml_struct.size - 4);
+        
+        model.material_textures.resize(numMaterials);
+        for (uint32_t i = 0; i < numMaterials && r.pos < ml_end; i++) {
+            ChunkHeader mat_hdr = r.read_chunk();
+            if (mat_hdr.type != 0x0007) { r.skip(mat_hdr.size); continue; }
+            size_t mat_end = r.pos + mat_hdr.size;
+            ChunkHeader mat_struct = r.read_chunk();
+            r.skip(mat_struct.size);
+            while (r.pos < mat_end) {
+                ChunkHeader th = r.read_chunk();
+                if (th.type == 0x0006) { // Texture
+                    size_t tex_end = r.pos + th.size;
+                    ChunkHeader ts = r.read_chunk();
+                    r.skip(ts.size);
+                    ChunkHeader str_h = r.read_chunk();
+                    if (str_h.type == 0x0002) {
+                        std::string tex_name(reinterpret_cast<const char*>(r.base + r.pos), str_h.size);
+                        while(!tex_name.empty() && tex_name.back() == '\0') tex_name.pop_back();
+                        model.material_textures[i] = tex_name;
+                    }
+                    r.pos = tex_end;
+                    break;
+                } else {
+                    r.skip(th.size);
+                }
+            }
+            r.pos = mat_end;
+        }
+    } else {
+        r.skip(ml_hdr.size);
+    }
+    
+    model.indices_by_mat.resize(model.material_textures.size());
+
+    // Ahora parseamos todo recursivamente buscando ATOMICSECTORs (0x0009)
+    while (r.pos < root_end) {
+        ChunkHeader ch = r.read_chunk();
+        
+        if (ch.type == 0x0009) { // ATOMICSECTOR
+            size_t atom_end = r.pos + ch.size;
+            ChunkHeader st = r.read_chunk();
+            uint32_t matListBase = r.read<uint32_t>();
+            uint32_t numTri      = r.read<uint32_t>();
+            uint32_t numVert     = r.read<uint32_t>();
+            // Struct header: matListBase(4)+numTri(4)+numVert(4)+bboxMin(12)+bboxMax(12)+pad(8) = 44 bytes
+            // We already read 12, skip the remaining bbox+padding
+            r.skip(32); // bboxMin(12) + bboxMax(12) + 2x uint32 unused(8)
+
+            if (numVert > 0 && numTri > 0) {
+                uint32_t vertex_offset = (uint32_t)model.vertices.size();
+
+                // st.size = 44 (header) + numVert*bpv + numTri*8
+                // Solve for bytes_per_vert (includes position)
+                size_t tri_bytes = (size_t)numTri * 8;
+                size_t total_vert_bytes = (st.size > 44 + tri_bytes) ? (st.size - 44 - tri_bytes) : 0;
+                size_t bpv = (numVert > 0 && total_vert_bytes > 0) ? total_vert_bytes / numVert : 12;
+
+                // Manhunt PC: 28 bpv = pos(12)+normal(4)+color(4)+uv(8)
+                bool has_normals = bpv >= 16; // pos + normals
+                bool has_colors  = bpv >= 20; // + colors
+                bool has_uv      = bpv >= 28; // + UVs
+
+                LOGI("ATOMICSECTOR: %u verts %u tris bpv=%zu nrm=%d col=%d uv=%d",
+                     numVert, numTri, bpv, has_normals, has_colors, has_uv);
+
+                // 1. Posiciones
+                for (uint32_t i = 0; i < numVert; i++) {
+                    DFFVertex v;
+                    v.x = r.read<float>();
+                    v.y = r.read<float>();
+                    v.z = r.read<float>();
+                    v.u  = 0.f; v.v  = 0.f;
+                    v.nx = 0.f; v.ny = 1.f; v.nz = 0.f;
+                    v.r = 255; v.g = 255; v.b = 255; v.a = 255;
+                    model.vertices.push_back(v);
+                }
+
+                // 2. Normales empaquetadas (int8 x4)
+                if (has_normals) {
+                    for (uint32_t i = 0; i < numVert; i++) {
+                        int8_t nx8 = (int8_t)r.read<uint8_t>();
+                        int8_t ny8 = (int8_t)r.read<uint8_t>();
+                        int8_t nz8 = (int8_t)r.read<uint8_t>();
+                        r.read<uint8_t>(); // pad
+                        model.vertices[vertex_offset + i].nx = nx8 / 127.f;
+                        model.vertices[vertex_offset + i].ny = ny8 / 127.f;
+                        model.vertices[vertex_offset + i].nz = nz8 / 127.f;
+                    }
+                }
+
+                // 3. Vertex colors (RGBA)
+                if (has_colors) {
+                    for (uint32_t i = 0; i < numVert; i++) {
+                        model.vertices[vertex_offset + i].r = r.read<uint8_t>();
+                        model.vertices[vertex_offset + i].g = r.read<uint8_t>();
+                        model.vertices[vertex_offset + i].b = r.read<uint8_t>();
+                        model.vertices[vertex_offset + i].a = r.read<uint8_t>();
+                    }
+                }
+
+                // 4. UVs
+                if (has_uv) {
+                    for (uint32_t i = 0; i < numVert; i++) {
+                        model.vertices[vertex_offset + i].u = r.read<float>();
+                        model.vertices[vertex_offset + i].v = r.read<float>();
+                    }
+                }
+
+                // 5. Triángulos (v1, v2, v3, matId) × 8 bytes
+                for (uint32_t i = 0; i < numTri; i++) {
+                    uint16_t v1     = r.read<uint16_t>();
+                    uint16_t v2     = r.read<uint16_t>();
+                    uint16_t v3     = r.read<uint16_t>();
+                    uint16_t mat_id = r.read<uint16_t>();
+                    if (mat_id < model.indices_by_mat.size()) {
+                        model.indices_by_mat[mat_id].push_back(vertex_offset + v1);
+                        model.indices_by_mat[mat_id].push_back(vertex_offset + v2);
+                        model.indices_by_mat[mat_id].push_back(vertex_offset + v3);
+                    }
+                }
+            }
+            r.pos = atom_end;
+        } 
+        else if (ch.type == 0x000A) { // PLANESECTOR
+            // PLANESECTOR wraps children — skip its own Struct, then fall into children
+            ChunkHeader st = r.read_chunk();
+            r.skip(st.size);
+        }
+        else {
+            r.skip(ch.size);
+        }
+    }
+
+    model.valid = true;
+    return model;
+}
