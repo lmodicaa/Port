@@ -4417,6 +4417,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
             g_turn_anim_request = turn_sign;
             g_turn_input_sign = turn_sign;
         }
+    } else if (dx == 0.0f && dy == 0.0f) {
+        // Android usa este par cero como fin del gesto derecho.
+        g_turn_input_sign = 0;
     }
 
     // Arrastrar hacia la derecha hace girar la cámara/personaje hacia
