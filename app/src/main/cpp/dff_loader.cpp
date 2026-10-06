@@ -10,6 +10,7 @@ static constexpr uint32_t RW_STRUCT        = 0x0001;
 static constexpr uint32_t RW_GEOMETRY      = 0x000F;
 static constexpr uint32_t RW_CLUMP         = 0x0010;
 static constexpr uint32_t RW_GEOMETRYLIST  = 0x001A;
+static constexpr uint32_t RW_ATOMIC       = 0x0014;
 
 struct ChunkHeader {
     uint32_t type;
@@ -174,6 +175,41 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
             );
             
             r.pos = frame_end;
+            continue;
+        }
+
+        if (hdr.type == RW_ATOMIC) {
+            const size_t atomic_end =
+                r.pos + hdr.size;
+
+            if (r.pos + sizeof(ChunkHeader) <= atomic_end) {
+                const ChunkHeader astruct =
+                    r.read_chunk();
+
+                if (astruct.type == RW_STRUCT &&
+                    r.pos + 16 <= atomic_end) {
+                    const uint32_t frame_index =
+                        r.read<uint32_t>();
+
+                    // geometryIndex + flags + unused
+                    r.read<uint32_t>();
+                    r.read<uint32_t>();
+                    r.read<uint32_t>();
+
+                    if (model.atomic_frame_index ==
+                        0xFFFFFFFF) {
+                        model.atomic_frame_index =
+                            frame_index;
+                    }
+
+                    LOGI(
+                        "Atomic: frameIndex=%u",
+                        frame_index
+                    );
+                }
+            }
+
+            r.pos = atomic_end;
             continue;
         }
 
