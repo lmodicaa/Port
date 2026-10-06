@@ -225,6 +225,19 @@ static std::string normalize_col_name(std::string s) {
     return s;
 }
 
+static bool is_dynamic_actor_col(const std::string& name) {
+    const std::string key = normalize_col_name(name);
+
+    // Estos modelos describen formas de personajes/estados del actor,
+    // no obstáculos estáticos del escenario.
+    return key == "player" ||
+           key == "hunter" ||
+           key == "visplayer" ||
+           key == "deadped" ||
+           key == "crouch" ||
+           key == "climb";
+}
+
 static GLuint get_texture(const std::string& name) {
     if (name.empty()) return 0;
     auto it = g_tex_map.find(to_lower(name));
@@ -487,6 +500,7 @@ static void rebuild_col_inst_collisions() {
     }
 
     size_t matched_instances = 0;
+    size_t skipped_actor_instances = 0;
     size_t mesh_faces = 0;
     size_t boxes = 0;
     size_t spheres = 0;
@@ -502,6 +516,12 @@ static void rebuild_col_inst_collisions() {
         }
 
         const ColModel& col = g_col_models[it->second];
+
+        if (is_dynamic_actor_col(col.name)) {
+            ++skipped_actor_instances;
+            continue;
+        }
+
         const Mat4 transform = mat4_from_pos_quat(inst.pos, inst.rot);
         ++matched_instances;
 
@@ -555,8 +575,9 @@ static void rebuild_col_inst_collisions() {
     }
 
     LOGI(
-        "COL inst collisions: matched=%zu meshFaces=%zu boxes=%zu spheres=%zu invalidFaces=%zu unmatchedModels=%zu",
+        "COL inst collisions: matched=%zu skippedActors=%zu meshFaces=%zu boxes=%zu spheres=%zu invalidFaces=%zu unmatchedModels=%zu",
         matched_instances,
+        skipped_actor_instances,
         mesh_faces,
         boxes,
         spheres,
@@ -1107,7 +1128,7 @@ static bool player_collision_at(
     const auto transform_local = [&](ColVec3 local) -> Vec3 {
         return {
             px + local.x * yaw_c + local.z * yaw_s,
-            py + local.y,
+            g_player_pos.y + local.y,
             pz - local.x * yaw_s + local.z * yaw_c
         };
     };
@@ -1296,7 +1317,7 @@ static bool hit_wall(
     // en la posición de destino. El resolvedor de movimiento de abajo
     // conserva el deslizamiento por X/Z.
     if (g_player_col_model) {
-        if (player_collision_at(x2, y2 - 1.0f, z2)) {
+        if (player_collision_at(x2, 0.0f, z2)) {
             return true;
         }
         return false;
