@@ -3473,10 +3473,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                      * Translation
                      * ------------------------------------------------
                      */
-                    // La traslación del keyframe HAnim es relativa
-                    // al offset local del Frame. El offset estructural
-                    // del DFF no se reemplaza: se suma el desplazamiento
-                    // que trae la animación.
+                    // En Manhunt, los tracks con traducción contienen
+                    // la transformación local animada del hueso, no un delta
+                    // que deba sumarse al offset del FrameList.
                     const float anim_tx =
                         k0->tx + t * (k1->tx - k0->tx);
                     const float anim_ty =
@@ -3485,20 +3484,24 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                         k0->tz + t * (k1->tz - k0->tz);
 
                     // El movimiento horizontal del actor ya se aplica
-                    // mediante g_player_pos. El track raíz también contiene
-                    // desplazamiento, pero aplicarlo aquí por segunda vez
-                    // produce "patinaje": los pies se mueven dentro del lugar
-                    // mientras el cuerpo se desplaza con el joystick.
+                    // mediante g_player_pos. No aplicamos la traslación X/Z
+                    // del root para evitar duplicar el movimiento del jugador.
                     const bool root_motion_track =
                         bone.bone_id == 1000;
 
-                    pos[0] =
-                        bone.pos_x +
-                        (root_motion_track ? 0.0f : anim_tx);
-                    pos[1] = bone.pos_y + anim_ty;
-                    pos[2] =
-                        bone.pos_z +
-                        (root_motion_track ? 0.0f : anim_tz);
+                    if (track.frame_type == 1) {
+                        // FrameType 1 = solo rotación: conservar la posición
+                        // estructural del FrameList.
+                        pos[0] = bone.pos_x;
+                        pos[1] = bone.pos_y;
+                        pos[2] = bone.pos_z;
+                    } else {
+                        // FrameType 2/3 = la posición del keyframe reemplaza
+                        // la posición local del FrameList.
+                        pos[0] = root_motion_track ? bone.pos_x : anim_tx;
+                        pos[1] = anim_ty;
+                        pos[2] = root_motion_track ? bone.pos_z : anim_tz;
+                    }
                     /*
                      * Debug solamente para algunos huesos.
                      */
