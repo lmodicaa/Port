@@ -489,6 +489,68 @@ static GLuint get_texture(const std::string& name) {
     return (it != g_tex_map.end()) ? it->second : 0;
 }
 
+static void dump_turn_animation_data() {
+    const char* names[] = {
+        "Stand_Turn",
+        "Stand_Turn_Left",
+        "Stand_Turn_Right",
+        "Sneak_Turn",
+        "Skid_Turn",
+        "Skid_Fwd",
+        "Skid_Bkw",
+        "Skid_Left",
+        "Skid_Right"
+    };
+
+    for (const char* wanted : names) {
+        auto it = g_anims.find(wanted);
+        if (it == g_anims.end()) {
+            const std::string query = to_lower(wanted);
+            for (const auto& pair : g_anims) {
+                if (to_lower(pair.first) == query) {
+                    it = g_anims.find(pair.first);
+                    break;
+                }
+            }
+        }
+
+        if (it == g_anims.end()) {
+            LOGI("TURN ANIM: %s NOT FOUND", wanted);
+            continue;
+        }
+
+        const Animation& anim = it->second;
+        float min_yaw = 0.0f;
+        float max_yaw = 0.0f;
+        bool has_root_rotation = false;
+
+        for (const auto& track : anim.tracks) {
+            if (track.bone_id != 1000 || track.keyframes.empty()) continue;
+
+            for (const auto& key : track.keyframes) {
+                // Quaternion Y component is logged as a diagnostic only.
+                // No assumptions are made about the runtime turn angle yet.
+                min_yaw = has_root_rotation
+                    ? std::min(min_yaw, key.qy)
+                    : key.qy;
+                max_yaw = has_root_rotation
+                    ? std::max(max_yaw, key.qy)
+                    : key.qy;
+                has_root_rotation = true;
+            }
+        }
+
+        LOGI(
+            "TURN ANIM: %s duration=%.3f tracks=%zu root_qy=[%.4f,%.4f]",
+            anim.name.c_str(),
+            anim.duration,
+            anim.tracks.size(),
+            min_yaw,
+            max_yaw
+        );
+    }
+}
+
 static void rebuild_debug_animation_list() {
     g_debug_anim_list.clear();
     g_debug_anim_list.reserve(g_anims.size());
@@ -2665,7 +2727,7 @@ static void setup_model() {
         for (const auto& pair : g_anims) {
             LOGI(" - %s", pair.first.c_str());
         }
-        rebuild_debug_animation_list();
+        rebuild_debug_animation_list();\n        dump_turn_animation_data();
     } else {
         g_anims.clear();
         g_debug_anim_list.clear();
