@@ -211,7 +211,6 @@ class MainActivity : Activity() {
 
         copy.setOnClickListener {
             val values =
-            val values =
                 "Pos X=${"%.2f".format(posX)}, " +
                 "Pos Y=${"%.2f".format(posY)}, " +
                 "Pos Z=${"%.2f".format(posZ)}, " +
