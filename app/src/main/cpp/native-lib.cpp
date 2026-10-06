@@ -1117,7 +1117,7 @@ static float segment_triangle_distance_sq(
 
 static bool player_collision_at(
     float px,
-    float py,
+    float,
     float pz
 ) {
     if (!g_player_col_model) return false;
@@ -1133,56 +1133,56 @@ static bool player_collision_at(
         };
     };
 
-    // El modelo player tiene la forma física real definida por COL:
-    // esferas + línea central.
-    std::vector<std::pair<Vec3, float>> player_spheres;
-    player_spheres.reserve(g_player_col_model->spheres.size());
+    // PLAYER COL original: en este archivo son 2 esferas + 1 línea.
+    // Usamos almacenamiento fijo para evitar allocaciones por frame.
+    Vec3 player_centers[8]{};
+    float player_radii[8]{};
+    size_t sphere_count = std::min<size_t>(
+        g_player_col_model->spheres.size(),
+        8
+    );
 
-    for (const auto& sphere : g_player_col_model->spheres) {
-        player_spheres.push_back({
-            transform_local(sphere.center),
-            sphere.radius
-        });
+    float max_radius = 0.0f;
+    for (size_t i = 0; i < sphere_count; ++i) {
+        player_centers[i] =
+            transform_local(g_player_col_model->spheres[i].center);
+        player_radii[i] =
+            std::max(0.01f, g_player_col_model->spheres[i].radius);
+        max_radius = std::max(
+            max_radius,
+            player_radii[i]
+        );
     }
 
     Vec3 line_a{};
     Vec3 line_b{};
     bool has_line = false;
+
     if (!g_player_col_model->lines.empty()) {
         line_a = transform_local(
-            ColVec3{
-                g_player_col_model->lines.front().a.x,
-                g_player_col_model->lines.front().a.y,
-                g_player_col_model->lines.front().a.z
-            }
+            g_player_col_model->lines[0].a
         );
         line_b = transform_local(
-            ColVec3{
-                g_player_col_model->lines.front().b.x,
-                g_player_col_model->lines.front().b.y,
-                g_player_col_model->lines.front().b.z
-            }
+            g_player_col_model->lines[0].b
         );
         has_line = true;
     }
 
-    const int center_cx =
-        static_cast<int>(std::floor(px / g_col_grid.cell_size));
-    const int center_cz =
-        static_cast<int>(std::floor(pz / g_col_grid.cell_size));
+    const int center_cx = static_cast<int>(
+        std::floor(px / g_col_grid.cell_size)
+    );
+    const int center_cz = static_cast<int>(
+        std::floor(pz / g_col_grid.cell_size)
+    );
 
-    // El radio máximo real del modelo player amplía la búsqueda a
-    // las celdas donde puede tocar una pared.
-    float max_radius = 0.0f;
-    for (const auto& sphere : player_spheres) {
-        max_radius = std::max(max_radius, sphere.second);
-    }
-
-    const int cell_radius =
-        std::max(1, static_cast<int>(
+    // Las esferas de player tienen radio 0.5 en el COL real.
+    const int cell_radius = std::max(
+        1,
+        static_cast<int>(
             std::ceil((max_radius + 0.25f) /
                       g_col_grid.cell_size)
-        ));
+        )
+    );
 
     for (int cx = center_cx - cell_radius;
          cx <= center_cx + cell_radius;
@@ -1204,6 +1204,7 @@ static bool player_collision_at(
                     tri.c.y - tri.a.y,
                     tri.c.z - tri.a.z
                 };
+
                 Vec3 n = vec3_cross(e1, e2);
                 const float nlen = sqrtf(
                     n.x*n.x + n.y*n.y + n.z*n.z
@@ -1214,28 +1215,41 @@ static bool player_collision_at(
                 n.y /= nlen;
                 n.z /= nlen;
 
-                // Para el desplazamiento horizontal, las superficies
-                // horizontales no deben frenar al jugador.
+                // El movimiento horizontal no debe chocar contra
+                // superficies que son suelo/techo.
                 if (fabsf(n.y) > 0.70f) continue;
 
-                for (const auto& sphere : player_spheres) {
-                    if (point_triangle_distance_sq(
-                            sphere.first,
+                // Las esferas son la parte principal del volumen corporal.
+                for (size_t i = 0; i < sphere_count; ++i) {
+                    const float dist_sq =
+                        point_triangle_distance_sq(
+                            player_centers[i],
                             tri
-                        ) <= sphere.second * sphere.second) {
+                        );
+
+                    const float r = player_radii[i];
+                    if (dist_sq <= r * r) {
                         return true;
                     }
                 }
 
+                // La línea original cubre la zona inferior del cuerpo.
+                // Basta comprobar si atraviesa la cara; las esferas
+                // aportan el volumen en los extremos.
                 if (has_line) {
-                    const float radius =
-                        std::max(0.01f, max_radius);
+                    const Vec3 line_dir = {
+                        line_b.x - line_a.x,
+                        line_b.y - line_a.y,
+                        line_b.z - line_a.z
+                    };
 
-                    if (segment_triangle_distance_sq(
+                    float hit_t = 0.0f;
+                    if (segment_intersects_triangle(
                             line_a,
-                            line_b,
-                            tri
-                        ) <= radius * radius) {
+                            line_dir,
+                            tri,
+                            hit_t
+                        )) {
                         return true;
                     }
                 }
@@ -1243,33 +1257,30 @@ static bool player_collision_at(
         }
     }
 
-    // Esferas de colisión de objetos.
+    // Colisiones esféricas de objetos del COL instanciados.
     for (const auto& object_sphere : g_col_spheres_world) {
-        float best_sq = 1e30f;
-
-        for (const auto& player_sphere : player_spheres) {
+        for (size_t i = 0; i < sphere_count; ++i) {
             const Vec3 d = {
-                player_sphere.first.x - object_sphere.first.x,
-                player_sphere.first.y - object_sphere.first.y,
-                player_sphere.first.z - object_sphere.first.z
+                player_centers[i].x - object_sphere.first.x,
+                player_centers[i].y - object_sphere.first.y,
+                player_centers[i].z - object_sphere.first.z
             };
             const float radius =
-                player_sphere.second + object_sphere.second;
+                player_radii[i] + object_sphere.second;
 
-            best_sq = std::min(
-                best_sq,
-                vec3_dot(d, d) - radius * radius
-            );
+            if (vec3_dot(d, d) <= radius * radius) {
+                return true;
+            }
         }
 
         if (has_line) {
-            // Distancia de la línea central del jugador a la esfera.
             const Vec3 seg = {
                 line_b.x - line_a.x,
                 line_b.y - line_a.y,
                 line_b.z - line_a.z
             };
             const float len_sq = vec3_dot(seg, seg);
+
             float u = 0.0f;
             if (len_sq > 1e-8f) {
                 const Vec3 to_sphere = {
@@ -1291,15 +1302,13 @@ static bool player_collision_at(
                 closest.y - object_sphere.first.y,
                 closest.z - object_sphere.first.z
             };
-            const float radius = max_radius + object_sphere.second;
+            const float radius =
+                max_radius + object_sphere.second;
 
-            best_sq = std::min(
-                best_sq,
-                vec3_dot(d, d) - radius * radius
-            );
+            if (vec3_dot(d, d) <= radius * radius) {
+                return true;
+            }
         }
-
-        if (best_sq <= 0.0f) return true;
     }
 
     return false;
