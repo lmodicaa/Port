@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "ManhuntCOL", __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "ManhuntCOL", __VA_ARGS__)
@@ -211,5 +212,15 @@ std::vector<ColModel> col_load_all(const uint8_t* data, size_t size) {
     }
 
     LOGI("COL cargado: %zu modelos de %d", result.size(), model_count);
+    for (size_t i = 0; i < result.size() && i < 40; ++i) {
+        const auto& model = result[i];
+        LOGI(
+            "COL MODEL[%zu] %s bounds=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f)",
+            i,
+            model.name.c_str(),
+            model.min.x, model.min.y, model.min.z,
+            model.max.x, model.max.y, model.max.z
+        );
+    }
     return result;
 }
