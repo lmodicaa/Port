@@ -3327,6 +3327,13 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 return nullptr;
             };
 
+            // Manhunt define tres zonas reales del stick:
+            //   0 .. MOVE_THRESHOLDS[0] = SNEAK
+            //   MOVE_THRESHOLDS[0] .. MOVE_THRESHOLDS[1] = WALK
+            //   MOVE_THRESHOLDS[1] .. 1 = RUN
+            //
+            // No convertimos la zona sneak en Walk_Fwd: el IFP contiene
+            // explícitamente las animaciones Sneak_Walk_*.
             if (animation_input >=
                     std::max(
                         g_player_control.move_run_threshold,
@@ -3337,13 +3344,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                        g_player_control.move_walk_threshold) {
                 anim = find_anim("Walk_Fwd");
             } else if (animation_input > 0.01f) {
-                // El archivo define una zona por debajo de WALK.
-                // Todavía no tenemos el estado de sigilo separado en
-                // nuestro control, así que mantenemos la animación de
-                // caminar antes que inventar una animación nueva.
-                anim = find_anim("Walk_Fwd");
+                anim = find_anim("Sneak_Walk_Fwd");
             } else {
-                anim = find_anim("Stand_Idle");
+                anim = find_anim("Stand");
             }
 
             if (!anim) {
