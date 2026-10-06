@@ -556,6 +556,20 @@ std::map<std::string, Animation> load_ifp(
 
                 /*
                  * ------------------------------------------------
+                 * PlayerAnims name dump
+                 * ------------------------------------------------
+                 */
+                if (blockName == "PlayerAnims") {
+                    LOGI(
+                        "PLAYER_ANIM [%u/%u]: %s",
+                        animationIndex + 1,
+                        animationCount,
+                        animation.name.c_str()
+                    );
+                }
+
+                /*
+                 * ------------------------------------------------
                  * Debug information
                  * ------------------------------------------------
                  */
