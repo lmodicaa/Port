@@ -3493,8 +3493,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             );
         }
 
-
-         */
         Vec3 center_pos = vec3_add(
             g_player_pos,
             {
