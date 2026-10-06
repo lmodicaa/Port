@@ -584,18 +584,25 @@ static std::string collision_data_for_instance(
     const std::string record =
         normalize_col_name(inst.name);
 
-    if (!record.empty()) {
+    // Cuando entityTypeData.ini está disponible, su ausencia de
+    // COLLISION_DATA es significativa: la entidad no tiene una
+    // geometría COL propia. No debemos inventar una usando el MODEL.
+    if (!g_entity_collision_data.empty()) {
+        if (record.empty()) return {};
+
         const auto type_it =
             g_entity_collision_data.find(record);
 
-        if (type_it != g_entity_collision_data.end() &&
-            !type_it->second.empty()) {
-            return type_it->second;
+        if (type_it == g_entity_collision_data.end() ||
+            type_it->second.empty()) {
+            return {};
         }
+
+        return type_it->second;
     }
 
-    // Fallback al modelo solamente cuando no existe información de
-    // COLLISION_DATA para el archetype.
+    // Solo usamos el modelo como fallback cuando el type data original
+    // todavía no está disponible.
     return normalize_col_name(inst.model);
 }
 
@@ -641,11 +648,12 @@ static void rebuild_col_inst_collisions() {
     size_t spheres = 0;
     size_t lines = 0;
     size_t invalid_faces = 0;
+    size_t no_collision_data = 0;
     size_t missing_type_data_col = 0;
     size_t missing_model_fallback_col = 0;
     std::map<std::string, size_t> unmatched_models;
     std::map<std::string, size_t> unmatched_type_data;
-    std::map<std::string, size_t> unmatched_fallback_classes;
+    std::map<std::string, size_t> no_collision_data_classes;
 
     for (const auto& inst : g_insts) {
         const std::string record_name =
@@ -659,9 +667,17 @@ static void rebuild_col_inst_collisions() {
             !type_it->second.empty();
 
         const std::string collision_name =
-            used_type_data
-                ? type_it->second
-                : normalize_col_name(inst.model);
+            collision_data_for_instance(inst);
+
+        if (collision_name.empty()) {
+            ++no_collision_data;
+            ++no_collision_data_classes[
+                inst.entity_class.empty()
+                    ? "<empty>"
+                    : inst.entity_class
+            ];
+            continue;
+        }
 
         const ColModel* col =
             find_col_model(collision_name);
@@ -672,11 +688,6 @@ static void rebuild_col_inst_collisions() {
                 ++unmatched_type_data[collision_name];
             } else {
                 ++missing_model_fallback_col;
-                ++unmatched_fallback_classes[
-                    inst.entity_class.empty()
-                        ? "<empty>"
-                        : inst.entity_class
-                ];
             }
             ++unmatched_models[collision_name];
             continue;
@@ -766,7 +777,8 @@ static void rebuild_col_inst_collisions() {
         "COL inst collisions: matched=%zu skippedActors=%zu "
         "byTypeData=%zu byModelFallback=%zu meshFaces=%zu "
         "boxes=%zu lines=%zu spheres=%zu invalidFaces=%zu "
-        "missingTypeDataCOL=%zu missingFallbackCOL=%zu unmatchedNames=%zu",
+        "noCollisionData=%zu missingTypeDataCOL=%zu "
+        "missingFallbackCOL=%zu unmatchedNames=%zu",
         matched_instances,
         skipped_actor_instances,
         matched_by_type_data,
@@ -776,6 +788,7 @@ static void rebuild_col_inst_collisions() {
         lines,
         spheres,
         invalid_faces,
+        no_collision_data,
         missing_type_data_col,
         missing_model_fallback_col,
         unmatched_models.size()
@@ -803,12 +816,12 @@ static void rebuild_col_inst_collisions() {
         );
     }
 
-    size_t shown_fallback_classes = 0;
-    for (const auto& pair : unmatched_fallback_classes) {
-        if (shown_fallback_classes++ >= 20) break;
+    size_t shown_no_collision_classes = 0;
+    for (const auto& pair : no_collision_data_classes) {
+        if (shown_no_collision_classes++ >= 20) break;
         LOGI(
-            "COL FALLBACK-NO-DATA CLASS[%zu]: class=%s x%zu",
-            shown_fallback_classes,
+            "COL NO-COLLISION-DATA CLASS[%zu]: class=%s x%zu",
+            shown_no_collision_classes,
             pair.first.c_str(),
             pair.second
         );
