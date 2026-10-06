@@ -3415,9 +3415,20 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                      * Translation
                      * ------------------------------------------------
                      */
-                    pos[0] = k0->tx + t * (k1->tx - k0->tx);
-                    pos[1] = k0->ty + t * (k1->ty - k0->ty);
-                    pos[2] = k0->tz + t * (k1->tz - k0->tz);
+                    // La traslación del keyframe HAnim es relativa
+                    // al offset local del Frame. El offset estructural
+                    // del DFF no se reemplaza: se suma el desplazamiento
+                    // que trae la animación.
+                    const float anim_tx =
+                        k0->tx + t * (k1->tx - k0->tx);
+                    const float anim_ty =
+                        k0->ty + t * (k1->ty - k0->ty);
+                    const float anim_tz =
+                        k0->tz + t * (k1->tz - k0->tz);
+
+                    pos[0] = bone.pos_x + anim_tx;
+                    pos[1] = bone.pos_y + anim_ty;
+                    pos[2] = bone.pos_z + anim_tz;
                     /*
                      * Debug solamente para algunos huesos.
                      */
