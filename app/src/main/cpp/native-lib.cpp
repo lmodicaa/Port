@@ -955,18 +955,16 @@ static float locomotion_root_motion_speed(
             : (local_right >= 0.0f ? "Right" : "Left");
 
     const char* family = nullptr;
+
+    // El joystick ya no selecciona estados de acción por intensidad.
+    // La locomoción normal siempre es WALK; Sprint y Sneak solo se
+    // activan desde sus botones dedicados.
     if (g_sprint_pressed) {
         family = "Sprint_";
     } else if (g_sneak_pressed) {
         family = "Sneak_Walk_";
-    } else if (animation_input >=
-        std::max(g_player_control.move_run_threshold,
-                 g_player_control.run_threshold)) {
-        family = "Run_";
-    } else if (animation_input >= g_player_control.move_walk_threshold) {
-        family = "Walk_";
     } else {
-        family = "Sneak_Walk_";
+        family = "Walk_";
     }
 
     const std::string wanted =
@@ -980,19 +978,11 @@ static float locomotion_root_motion_speed(
     // original de la animación. La mayoría valen 1.0; Sneak_Walk es 1.2.
     float speed_multiplier = 1.0f;
     if (family == std::string("Sneak_Walk_")) {
-        speed_multiplier =
-            (g_sneak_pressed &&
-             animation_input >=
-                 std::max(g_player_control.move_run_threshold,
-                          g_player_control.run_threshold))
-                ? g_player_control.sneak_run_speed
-                : g_player_control.sneak_walk_speed;
+        speed_multiplier = g_player_control.sneak_walk_speed;
     } else if (family == std::string("Sprint_")) {
         speed_multiplier = g_player_control.sprint_speed;
     } else if (family == std::string("Walk_")) {
         speed_multiplier = g_player_control.walk_speed;
-    } else if (family == std::string("Run_")) {
-        speed_multiplier = g_player_control.run_speed;
     }
 
     return base_speed * speed_multiplier;
@@ -3857,23 +3847,19 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                     ? (direction_fwd >= 0.0f ? "Fwd" : "Bkw")
                     : (direction_right >= 0.0f ? "Right" : "Left");
 
-            // Estados de movimiento del PC:
-            // Shift fuerza Sprint, mientras Ctrl fuerza Sneak.
-            // Si ninguno está pulsado, se mantienen las tres zonas
-            // originales determinadas por la intensidad del movimiento.
+            // Estados de movimiento:
+            // - Joystick solo = Walk.
+            // - Sprint = botón dedicado.
+            // - Sneak = botón dedicado.
+            // La intensidad del joystick ya no convierte automáticamente
+            // Walk en Run ni en Sneak.
             const char* family = nullptr;
             if (g_sprint_pressed && animation_input > 0.01f) {
                 family = "Sprint_";
             } else if (g_sneak_pressed && animation_input > 0.01f) {
                 family = "Sneak_Walk_";
-            } else if (animation_input >=
-                    std::max(g_player_control.move_run_threshold,
-                             g_player_control.run_threshold)) {
-                family = "Run_";
-            } else if (animation_input >= g_player_control.move_walk_threshold) {
-                family = "Walk_";
             } else if (animation_input > 0.01f) {
-                family = "Sneak_Walk_";
+                family = "Walk_";
             }
 
             if (family) {
