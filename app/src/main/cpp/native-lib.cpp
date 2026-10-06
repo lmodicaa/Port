@@ -3048,10 +3048,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             // Bind pose: no aplicar IFP.
             anim = nullptr;
         } else {
-            const float speed = sqrtf(
-                g_move_fwd * g_move_fwd +
-                g_move_right * g_move_right
-            );
+            // Usar la misma intensidad de movimiento que ya fue
+            // recalibrada con STICK_DEAD_ZONE y MOVE_THRESHOLDS.
+            const float animation_input = input_strength;
 
             auto find_anim = [&](const char* wanted) -> const Animation* {
                 const std::string query = to_lower(wanted);
@@ -3063,9 +3062,20 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 return nullptr;
             };
 
-            if (speed > 0.6f) {
+            if (animation_input >=
+                    std::max(
+                        g_player_control.move_run_threshold,
+                        g_player_control.run_threshold
+                    )) {
                 anim = find_anim("Run_Fwd");
-            } else if (speed > 0.05f) {
+            } else if (animation_input >=
+                       g_player_control.move_walk_threshold) {
+                anim = find_anim("Walk_Fwd");
+            } else if (animation_input > 0.01f) {
+                // El archivo define una zona por debajo de WALK.
+                // Todavía no tenemos el estado de sigilo separado en
+                // nuestro control, así que mantenemos la animación de
+                // caminar antes que inventar una animación nueva.
                 anim = find_anim("Walk_Fwd");
             } else {
                 anim = find_anim("Stand_Idle");
