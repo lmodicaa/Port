@@ -3275,8 +3275,13 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
          * --------------------------------------------------------
          */
         Mat4 local_bones[96];
+        Mat4 bind_local_bones[96];
+        bool animated_bones[96] = {};
+
         for (int i = 0; i < 96; ++i) {
             local_bones[i] = mat4_identity();
+            bind_local_bones[i] = mat4_identity();
+            animated_bones[i] = false;
         }
 
         for (
@@ -3501,7 +3506,76 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
              * en el FrameList.
              * --------------------------------------------------------
              */
+            bind_local_bones[bone_idx] = bind_mat;
             local_bones[bone_idx] = local_mat;
+            animated_bones[bone_idx] = animated;
+        }
+
+        // ------------------------------------------------------------
+        // Resolver también la jerarquía de bind por separado.
+        // Se usa únicamente para la referencia del Atomic.
+        // ------------------------------------------------------------
+        Mat4 bind_global_bones[96];
+        for (int i = 0; i < 96; ++i) {
+            bind_global_bones[i] = mat4_identity();
+        }
+
+        int bind_global_state[96] = {};
+
+        auto build_bind_global =
+            [&](auto&& self, size_t idx) -> void {
+                if (idx >= g_cash_model.bones.size() ||
+                    idx >= 96) {
+                    return;
+                }
+
+                if (bind_global_state[idx] == 2) {
+                    return;
+                }
+
+                if (bind_global_state[idx] == 1) {
+                    bind_global_bones[idx] =
+                        bind_local_bones[idx];
+                    bind_global_state[idx] = 2;
+                    return;
+                }
+
+                bind_global_state[idx] = 1;
+
+                const uint32_t parent =
+                    g_cash_model.bones[idx].parent;
+
+                if (parent != 0xFFFFFFFF &&
+                    parent < g_cash_model.bones.size() &&
+                    parent < 96 &&
+                    parent != idx) {
+
+                    self(
+                        self,
+                        static_cast<size_t>(parent)
+                    );
+
+                    bind_global_bones[idx] =
+                        mat4_mul(
+                            bind_global_bones[parent],
+                            bind_local_bones[idx]
+                        );
+                } else {
+                    bind_global_bones[idx] =
+                        bind_local_bones[idx];
+                }
+
+                bind_global_state[idx] = 2;
+            };
+
+        for (size_t bone_idx = 0;
+             bone_idx < g_cash_model.bones.size() &&
+             bone_idx < 96;
+             ++bone_idx) {
+            build_bind_global(
+                build_bind_global,
+                bone_idx
+            );
         }
 
         // ------------------------------------------------------------
@@ -3574,6 +3648,94 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         }
 
         // ------------------------------------------------------------
+        // Construir las matrices animadas en el orden HAnim.
+        //
+        // librw::HAnimHierarchy::updateMatrices() recorre nodeInfo[] y
+        // reconstruye la jerarquía mediante PUSH/POP. No utiliza el
+        // parent del FrameList para este paso.
+        // ------------------------------------------------------------
+        Mat4 hanim_global_bones[96];
+        for (int i = 0; i < 96; ++i) {
+            hanim_global_bones[i] = mat4_identity();
+        }
+
+        if (anim &&
+            !g_cash_model.skin_bone_to_frame.empty()) {
+
+            Mat4 parent_hanim = mat4_identity();
+            Mat4 parent_stack[64];
+            int parent_stack_size = 0;
+
+            const size_t hanim_count =
+                std::min(
+                    g_cash_model.skin_bone_to_frame.size(),
+                    static_cast<size_t>(96)
+                );
+
+            for (size_t h = 0;
+                 h < hanim_count;
+                 ++h) {
+
+                const uint8_t frame_u8 =
+                    g_cash_model.skin_bone_to_frame[h];
+
+                if (frame_u8 == 0xFF) {
+                    hanim_global_bones[h] =
+                        parent_hanim;
+                    continue;
+                }
+
+                const size_t frame_index =
+                    static_cast<size_t>(frame_u8);
+
+                // Los nodos que no tienen track activo producen
+                // la identidad, igual que el InterpFrame inicial.
+                Mat4 anim_local = mat4_identity();
+
+                if (frame_index <
+                    g_cash_model.bones.size() &&
+                    frame_index < 96 &&
+                    animated_bones[frame_index]) {
+
+                    anim_local =
+                        local_bones[frame_index];
+                }
+
+                // Matrix::mult(dst, animMat, parentMat) en librw
+                // equivale a parent * animMat en nuestra convención.
+                hanim_global_bones[h] =
+                    mat4_mul(
+                        parent_hanim,
+                        anim_local
+                    );
+
+                const uint32_t flags =
+                    h < g_cash_model.hanim_node_flags.size()
+                        ? g_cash_model.hanim_node_flags[h]
+                        : 0u;
+
+                if (flags & 2u) { // HAnimNodeFlag::PUSH
+                    if (parent_stack_size < 64) {
+                        parent_stack[parent_stack_size++] =
+                            parent_hanim;
+                    }
+                }
+
+                parent_hanim =
+                    hanim_global_bones[h];
+
+                if (flags & 1u) { // HAnimNodeFlag::POP
+                    if (parent_stack_size > 0) {
+                        parent_hanim =
+                            parent_stack[
+                                --parent_stack_size
+                            ];
+                    }
+                }
+            }
+        }
+
+        // ------------------------------------------------------------
         // Construir la palette Skin.
         // RenderWare/librw:
         //   skin = inverseAtomic * hierarchyMatrix * inverseBind
@@ -3592,7 +3754,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
 
             atomic_inverse =
                 mat4_inverse_rigid(
-                    global_bones[
+                    bind_global_bones[
                         g_cash_model.atomic_frame_index
                     ]
                 );
@@ -3630,11 +3792,28 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                         ];
             }
 
-            const Mat4 hierarchy_relative =
-                mat4_mul(
-                    atomic_inverse,
-                    global_bones[frame_index]
-                );
+            Mat4 hierarchy_relative;
+
+            if (anim &&
+                skin_bone <
+                g_cash_model.skin_bone_to_frame.size()) {
+
+                hierarchy_relative =
+                    mat4_mul(
+                        atomic_inverse,
+                        hanim_global_bones[
+                            skin_bone
+                        ]
+                    );
+            } else {
+                hierarchy_relative =
+                    mat4_mul(
+                        atomic_inverse,
+                        bind_global_bones[
+                            frame_index
+                        ]
+                    );
+            }
 
             skin_matrices[skin_bone] =
                 mat4_mul(
