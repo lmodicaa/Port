@@ -18,6 +18,7 @@
 #include "dff_loader.h"
 #include "inst_loader.h"
 #include "ifp_loader.h"
+#include "col_loader.h"
 
 #define LOG_TAG "Manhunt"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
@@ -380,8 +381,115 @@ struct CollisionGrid {
 };
 
 static CollisionGrid g_col_grid;
+static std::vector<ColModel> g_col_models;
+static std::map<std::string, size_t> g_col_model_by_name;
+static std::vector<std::pair<Vec3, float>> g_col_spheres_world;
 static std::vector<EntityInst> g_insts;
 #include <map>
+
+static Vec3 col_to_vec3(const ColVec3& v) {
+    return {v.x, v.y, v.z};
+}
+
+static void add_collision_box(
+    const ColBox& box,
+    const Mat4& transform
+) {
+    const Vec3 p[8] = {
+        mat4_transform_point(transform, {box.min.x, box.min.y, box.min.z}),
+        mat4_transform_point(transform, {box.max.x, box.min.y, box.min.z}),
+        mat4_transform_point(transform, {box.max.x, box.max.y, box.min.z}),
+        mat4_transform_point(transform, {box.min.x, box.max.y, box.min.z}),
+        mat4_transform_point(transform, {box.min.x, box.min.y, box.max.z}),
+        mat4_transform_point(transform, {box.max.x, box.min.y, box.max.z}),
+        mat4_transform_point(transform, {box.max.x, box.max.y, box.max.z}),
+        mat4_transform_point(transform, {box.min.x, box.max.y, box.max.z})
+    };
+
+    const int triangles[12][3] = {
+        {0, 1, 5}, {0, 5, 4},
+        {1, 2, 6}, {1, 6, 5},
+        {2, 3, 7}, {2, 7, 6},
+        {3, 0, 4}, {3, 4, 7},
+        {3, 6, 2}, {3, 7, 6},
+        {0, 4, 5}, {0, 5, 1}
+    };
+
+    for (const auto& tri : triangles) {
+        g_col_grid.add({p[tri[0]], p[tri[1]], p[tri[2]]});
+    }
+}
+
+static void rebuild_col_inst_collisions() {
+    if (g_col_models.empty() || g_insts.empty()) {
+        LOGI("COL inst collisions: no hay modelos COL o instancias");
+        return;
+    }
+
+    g_col_model_by_name.clear();
+    for (size_t i = 0; i < g_col_models.size(); ++i) {
+        g_col_model_by_name[to_lower(g_col_models[i].name)] = i;
+    }
+
+    size_t matched_instances = 0;
+    size_t mesh_faces = 0;
+    size_t boxes = 0;
+    size_t spheres = 0;
+
+    for (const auto& inst : g_insts) {
+        const auto it = g_col_model_by_name.find(to_lower(inst.model));
+        if (it == g_col_model_by_name.end()) continue;
+
+        const ColModel& col = g_col_models[it->second];
+        const Mat4 transform = mat4_from_pos_quat(inst.pos, inst.rot);
+        ++matched_instances;
+
+        for (const auto& face : col.faces) {
+            if (face.a >= col.vertices.size() ||
+                face.b >= col.vertices.size() ||
+                face.c >= col.vertices.size()) {
+                continue;
+            }
+
+            const Vec3 a = mat4_transform_point(
+                transform, col_to_vec3(col.vertices[face.a])
+            );
+            const Vec3 b = mat4_transform_point(
+                transform, col_to_vec3(col.vertices[face.b])
+            );
+            const Vec3 c = mat4_transform_point(
+                transform, col_to_vec3(col.vertices[face.c])
+            );
+
+            g_col_grid.add({a, b, c});
+            ++mesh_faces;
+        }
+
+        for (const auto& box : col.boxes) {
+            add_collision_box(box, transform);
+            ++boxes;
+        }
+
+        for (const auto& sphere : col.spheres) {
+            const Vec3 center = mat4_transform_point(
+                transform, col_to_vec3(sphere.center)
+            );
+
+            // INST usa rotación + posición, sin escala.
+            g_col_spheres_world.push_back({center, sphere.radius});
+            ++spheres;
+        }
+    }
+
+    LOGI(
+        "COL inst collisions: matched=%zu meshFaces=%zu boxes=%zu spheres=%zu",
+        matched_instances,
+        mesh_faces,
+        boxes,
+        spheres
+    );
+}
+
 static std::map<std::string, DFFModel> g_models;
 
 struct ModelRenderData {
@@ -602,6 +710,41 @@ static float find_floor(float px, float search_y, float pz) {
 
 static bool hit_wall(float x1, float y1, float z1, float x2, float y2, float z2) {
     Vec3 ray_o = {x1, y1, z1};
+
+    // Esferas de los modelos COL instanciados.
+    const Vec3 segment = {x2 - x1, y2 - y1, z2 - z1};
+    const float segment_len_sq =
+        segment.x * segment.x +
+        segment.y * segment.y +
+        segment.z * segment.z;
+
+    constexpr float PLAYER_COLLISION_RADIUS = 0.30f;
+    for (const auto& sphere : g_col_spheres_world) {
+        float u = 0.0f;
+        if (segment_len_sq > 0.000001f) {
+            u = (
+                (sphere.first.x - x1) * segment.x +
+                (sphere.first.y - y1) * segment.y +
+                (sphere.first.z - z1) * segment.z
+            ) / segment_len_sq;
+            u = std::max(0.0f, std::min(1.0f, u));
+        }
+
+        const Vec3 closest = {
+            x1 + segment.x * u,
+            y1 + segment.y * u,
+            z1 + segment.z * u
+        };
+
+        const float dx = closest.x - sphere.first.x;
+        const float dy = closest.y - sphere.first.y;
+        const float dz = closest.z - sphere.first.z;
+        const float hit_radius = sphere.second + PLAYER_COLLISION_RADIUS;
+
+        if (dx * dx + dy * dy + dz * dz <= hit_radius * hit_radius) {
+            return true;
+        }
+    }
     Vec3 ray_d = {x2 - x1, y2 - y1, z2 - z1};
     const float dist = sqrtf(
         ray_d.x*ray_d.x +
@@ -852,6 +995,22 @@ static void setup_model() {
     
     if (!inst_raw.empty()) {
         g_insts = parse_inst(inst_raw);
+
+        auto inst2_raw = read_asset("levels/asylum/entity2.inst");
+        if (!inst2_raw.empty()) {
+            auto inst2 = parse_inst(inst2_raw);
+            g_insts.insert(g_insts.end(), inst2.begin(), inst2.end());
+            LOGI("Instancias totales: %zu", g_insts.size());
+        }
+    }
+
+    auto col_raw = read_asset("levels/asylum/collisions.col");
+    if (!col_raw.empty()) {
+        g_col_models = col_load_all(col_raw.data(), col_raw.size());
+        g_col_spheres_world.clear();
+        rebuild_col_inst_collisions();
+    } else {
+        LOGE("No se encontró levels/asylum/collisions.col");
     }
 
     auto dff_raw = read_asset("levels/asylum/pak/modelspc.dff");
