@@ -261,11 +261,12 @@ static AnimationTrack readTrack(Reader2& reader)
     if (frameType == 3) {
 
         // FrameType 3 stores a constant direction quaternion.
-        // Manhunt stores its four components using the 2048 scale.
-        initialQx = static_cast<float>(reader.i16()) / 2048.0f;
-        initialQy = static_cast<float>(reader.i16()) / 2048.0f;
-        initialQz = static_cast<float>(reader.i16()) / 2048.0f;
-        initialQw = static_cast<float>(reader.i16()) / 2048.0f;
+        // Direction quaternion uses the same fixed-point quaternion
+        // scale as the per-frame rotations.
+        initialQx = decodeQuat(reader.i16());
+        initialQy = decodeQuat(reader.i16());
+        initialQz = decodeQuat(reader.i16());
+        initialQw = decodeQuat(reader.i16());
 
         // There is NO initialization position here.
         // The following bytes belong to the frame timing/data.
