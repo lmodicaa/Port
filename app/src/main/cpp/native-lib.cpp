@@ -2099,31 +2099,15 @@ static void setup_model() {
             dump_cash_debug(cash_model);
             g_model_render["cash"] = rd;
 
-            const size_t skin_matrix_count =
-                g_cash_model.inverse_bind_matrices.size() / 16;
-            size_t mapped_bones = 0;
-
-            for (const auto& bone : g_cash_model.bones) {
-                if (bone.bone_id != 0xFFFFFFFF &&
-                    bone.matrix_index != 0xFFFFFFFF &&
-                    static_cast<size_t>(bone.matrix_index) <
-                        skin_matrix_count) {
-                    ++mapped_bones;
-                }
-            }
-
-            g_cash_skinning_enabled =
-                !g_cash_model.bones.empty() &&
-                skin_matrix_count > 0 &&
-                mapped_bones > 0;
+            // Mantener el personaje visualmente estable mientras
+            // terminamos de validar el mapeo Skin/HAnim.
+            g_cash_skinning_enabled = false;
 
             LOGI(
-                "CASH SKINNING: enabled=%s bones=%zu "
-                "skinMatrices=%zu mapped=%zu",
-                g_cash_skinning_enabled ? "YES" : "NO",
+                "CASH SKINNING: disabled pending HAnim/Skin mapping validation. "
+                "bones=%zu skinMatrices=%zu",
                 g_cash_model.bones.size(),
-                skin_matrix_count,
-                mapped_bones
+                g_cash_model.inverse_bind_matrices.size() / 16
             );
 
             g_cash_y_offset = 0.0f;
@@ -2365,8 +2349,8 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     // Arrancar en selección automática. El jugador debe comenzar
     // en Stand_Idle y cambiar a Walk/Run según el movimiento.
     g_debug_anim_idx = -2;
-    // Se habilita cuando el modelo cargado tenga un skeleton HAnim + Skin
-    // coherente. setup_model() hará la comprobación final.
+    // El skinning queda desactivado hasta validar el mapeo exacto
+    // HAnim -> Skin -> FrameList del DFF de Cash.
     g_cash_skinning_enabled = false;
     g_cash_pos_adjust = {0.0f, 1.0f, 0.0f};
     g_cash_rot_adjust_deg = {0.0f, -91.0f, 180.0f};
