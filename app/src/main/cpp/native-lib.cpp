@@ -667,6 +667,59 @@ static bool is_looping_locomotion_animation(const Animation* anim) {
            n == "Sprint_Left" || n == "Sprint_Right";
 }
 
+static float locomotion_root_motion_speed(
+    float animation_input,
+    Vec3 vel_xz
+) {
+    if (animation_input <= 0.01f) return 0.0f;
+
+    auto find_anim = [&](const char* wanted) -> const Animation* {
+        const std::string query = to_lower(wanted);
+        for (const auto& pair : g_anims) {
+            if (to_lower(pair.first) == query) {
+                return &pair.second;
+            }
+        }
+        return nullptr;
+    };
+
+    const float player_cy = cosf(g_player_yaw);
+    const float player_sy = sinf(g_player_yaw);
+    const Vec3 player_fwd = {-player_sy, 0.0f, -player_cy};
+    const Vec3 player_right = {player_cy, 0.0f, -player_sy};
+
+    const float local_fwd =
+        vel_xz.x * player_fwd.x + vel_xz.z * player_fwd.z;
+    const float local_right =
+        vel_xz.x * player_right.x + vel_xz.z * player_right.z;
+
+    const bool use_forward_axis =
+        std::fabs(local_fwd) >= std::fabs(local_right);
+
+    const char* direction =
+        use_forward_axis
+            ? (local_fwd >= 0.0f ? "Fwd" : "Bkw")
+            : (local_right >= 0.0f ? "Right" : "Left");
+
+    const char* family = nullptr;
+    if (animation_input >=
+        std::max(g_player_control.move_run_threshold,
+                 g_player_control.run_threshold)) {
+        family = "Run_";
+    } else if (animation_input >= g_player_control.move_walk_threshold) {
+        family = "Walk_";
+    } else {
+        family = "Sneak_Walk_";
+    }
+
+    const std::string wanted =
+        std::string(family) + direction;
+
+    return animation_root_motion_speed(
+        find_anim(wanted.c_str())
+    );
+}
+
 static std::string g_last_played_anim;
 static const Animation* g_current_anim = nullptr;
 static const Animation* g_previous_anim = nullptr;
@@ -2747,7 +2800,10 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     // La animación elegida contiene el desplazamiento original del ciclo.
     // Usarlo como velocidad mantiene sincronizados pasos y desplazamiento.
     const float root_motion_speed =
-        animation_root_motion_speed(anim);
+        locomotion_root_motion_speed(
+            input_strength,
+            vel_xz
+        );
 
     const float movement_speed =
         root_motion_speed > 0.0001f
