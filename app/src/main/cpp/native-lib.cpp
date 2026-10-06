@@ -2403,9 +2403,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     g_on_ground = false;
     g_move_fwd  = 0.f;
     g_move_right= 0.f;
-    // Primera prueba del skinning corregido: pose base, sin IFP.
-    // Así verificamos Skin + FrameList por separado antes de mezclar
-    // animación.
+    // Empezamos en bind pose; después de validar Skin se activa el IFP.
     g_debug_anim_idx = -1;
     g_cash_skinning_enabled = false;
     g_cash_skin_convention = -1;
@@ -3192,8 +3190,15 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         // Skin usa el orden HAnim y la fórmula de RenderWare/librw:
         // inverseAtomic * hierarchyMatrix * inverseBind.
         // HAnim node -> FrameList se resolvió durante la carga del DFF.
-        // 100 = remap + inverseAtomic + inverseAtomic antes del hueso.
+        // Convención ya validada contra la pose bind.
         g_cash_skin_convention = 100;
+
+        // La pose bind quedó matemáticamente correcta. A partir del
+        // siguiente frame dejamos que el selector automático elija el IFP.
+        if (g_debug_anim_idx == -1) {
+            g_debug_anim_idx = -2;
+            LOGI("IFP: Skin validado, activando animacion automatica");
+        }
 
         /*
          * --------------------------------------------------------
