@@ -3687,15 +3687,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             }
         }
 
-        // Un giro no es una animación de locomoción: cuando llega al final,
-        // volver al estado Stand. Esto evita que se corte al frame siguiente
-        // y tampoco permite que quede en loop.
-        if (g_turn_anim_active != 0 &&
-            anim &&
-            animation_time >= anim->duration - 0.0001f) {
-            g_turn_anim_active = 0;
-        }
-
         if (g_previous_anim &&
             g_player_control.move_transition_speed > 0.0f &&
             g_anim_transition_time <
