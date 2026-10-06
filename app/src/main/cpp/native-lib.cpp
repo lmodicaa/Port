@@ -759,6 +759,8 @@ static float g_turn_gesture_amount = 0.0f;
 // continuamente; no se fuerza una animación de giro por cada gesto.
 
 // Movimiento joystick (actualizados desde Kotlin)
+static float g_touch_sensitivity = 1.0f;
+
 static float g_move_fwd   = 0.f;  // -1..1  (adelante/atrás)
 static float g_move_right = 0.f;  // -1..1  (izquierda/derecha)
 
@@ -4481,6 +4483,12 @@ static float snap_aim_angle(float angle) {
 }
 
 JNIEXPORT void JNICALL
+Java_com_manhunt_port_ManhuntRenderer_nativeSetTouchSensitivity(JNIEnv*, jobject, jfloat percent) {
+    const float p = std::max(0.0f, std::min(100.0f, percent));
+    g_touch_sensitivity = 0.05f + 1.95f * (p / 100.0f);
+}
+
+JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_x, jfloat stick_y, jboolean touch_mode) {
     const double now = aim_time_seconds();
     float dt = 0.016f;
@@ -4513,8 +4521,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
         y = -cosf(snapped);
     }
 
-    const float horizontal_speed = aim_zone_speed(distance, false);
-    const float vertical_speed = aim_zone_speed(distance, true);
+    const float touch_multiplier = touch_mode ? g_touch_sensitivity : 1.0f;
+    const float horizontal_speed = aim_zone_speed(distance, false) * touch_multiplier;
+    const float vertical_speed = aim_zone_speed(distance, true) * touch_multiplier;
 
     float yaw_speed = horizontal_speed;
     const bool full_horizontal =
