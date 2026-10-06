@@ -3659,11 +3659,20 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
 
             if (g_previous_anim && anim &&
                 g_previous_anim != anim) {
+                const bool turn_animation =
+                    anim->name == "Stand_Turn" ||
+                    anim->name == "Stand_Turn_Right";
+                if (turn_animation) {
+                    // El giro debe arrancar inmediatamente; el crossfade de
+                    // MOVE_TRANS_SPEED se nota como input lag en esta animación.
+                    g_anim_transition_time =
+                        g_player_control.move_transition_speed;
+                }
                 LOGI(
                     "ANIM TRANSITION: %s -> %s (%.3fs)",
                     g_previous_anim->name.c_str(),
                     anim->name.c_str(),
-                    g_player_control.move_transition_speed
+                    turn_animation ? 0.0f : g_player_control.move_transition_speed
                 );
             }
         }
@@ -4398,7 +4407,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
         g_turn_anim = nullptr;
     } else {
         g_turn_gesture_amount += fabsf(dx * SENS);
-        if (!g_turn_gesture_active && g_turn_gesture_amount >= 0.01f) {
+        if (!g_turn_gesture_active && g_turn_gesture_amount > 0.0f) {
             g_turn_gesture_active = true;
             const char* wanted = dx > 0.0f ? "Stand_Turn_Right" : "Stand_Turn";
             const std::string query = to_lower(wanted);
