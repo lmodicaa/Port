@@ -345,33 +345,24 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                         if (remaining >= (uint32_t)boneCount * 64) {
                             model.inverse_bind_matrices.resize((size_t)boneCount * 16);
 
-                            // Las inverse-bind del Skin plugin están almacenadas
-                            // con el orden matricial de RenderWare. Para usarlas
-                            // como Mat4 column-major de OpenGL debemos convertir
-                            // la representación a nuestra convención.
+                            // RenderWare guarda RwMatrix como cuatro
+                            // vectores consecutivos: right, up, at, pos.
+                            // Nuestra Mat4 también usa esas cuatro columnas,
+                            // por lo que NO hay que transponer.
                             for (uint32_t b = 0; b < boneCount; b++) {
-                                float raw[16];
-                                for (int k = 0; k < 16; ++k) {
-                                    raw[k] = r.read<float>();
-                                }
-
                                 float* m =
                                     &model.inverse_bind_matrices[
                                         static_cast<size_t>(b) * 16
                                     ];
 
-                                // Transposición explícita: raw es la
-                                // representación de RenderWare; m queda en
-                                // column-major para mat4_mul()/GLSL.
-                                for (int row = 0; row < 4; ++row) {
-                                    for (int col = 0; col < 4; ++col) {
-                                        m[row + col * 4] =
-                                            raw[col + row * 4];
-                                    }
+                                for (int k = 0; k < 16; ++k) {
+                                    m[k] = r.read<float>();
                                 }
 
-                                m[3] = 0.0f;
-                                m[7] = 0.0f;
+                                // El último componente de right/up/at debe
+                                // ser 0 y el de pos debe ser 1.
+                                m[3]  = 0.0f;
+                                m[7]  = 0.0f;
                                 m[11] = 0.0f;
                                 m[15] = 1.0f;
                             }
