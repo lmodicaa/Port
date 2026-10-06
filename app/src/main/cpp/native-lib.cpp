@@ -90,6 +90,75 @@ static Mat4 mat4_perspective(float fovY, float aspect, float nearZ, float farZ) 
     return r;
 }
 
+static void quat_slerp(
+    const float* a,
+    const float* b,
+    float t,
+    float* out)
+{
+    float bx = b[0];
+    float by = b[1];
+    float bz = b[2];
+    float bw = b[3];
+
+    float dot =
+        a[0] * bx +
+        a[1] * by +
+        a[2] * bz +
+        a[3] * bw;
+
+    if (dot < 0.0f) {
+        dot = -dot;
+        bx = -bx;
+        by = -by;
+        bz = -bz;
+        bw = -bw;
+    }
+
+    dot = std::max(-1.0f, std::min(1.0f, dot));
+
+    if (dot > 0.9995f) {
+        out[0] = a[0] + t * (bx - a[0]);
+        out[1] = a[1] + t * (by - a[1]);
+        out[2] = a[2] + t * (bz - a[2]);
+        out[3] = a[3] + t * (bw - a[3]);
+
+        const float len = sqrtf(
+            out[0] * out[0] +
+            out[1] * out[1] +
+            out[2] * out[2] +
+            out[3] * out[3]
+        );
+
+        if (len > 1e-6f) {
+            out[0] /= len;
+            out[1] /= len;
+            out[2] /= len;
+            out[3] /= len;
+        }
+        return;
+    }
+
+    const float theta = acosf(dot);
+    const float sinTheta = sinf(theta);
+
+    if (fabsf(sinTheta) < 1e-6f) {
+        out[0] = a[0];
+        out[1] = a[1];
+        out[2] = a[2];
+        out[3] = a[3];
+        return;
+    }
+
+    const float w0 = sinf((1.0f - t) * theta) / sinTheta;
+    const float w1 = sinf(t * theta) / sinTheta;
+
+    out[0] = w0 * a[0] + w1 * bx;
+    out[1] = w0 * a[1] + w1 * by;
+    out[2] = w0 * a[2] + w1 * bz;
+    out[3] = w0 * a[3] + w1 * bw;
+}
+
 static Mat4 mat4_from_pos_quat(const float* pos, const float* rot) {
     float x = rot[0], y = rot[1], z = rot[2], w = rot[3];
     Mat4 r = {0};
@@ -3320,39 +3389,22 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                      * Quaternion
                      * ------------------------------------------------
                      */
-                    float qx1 = k1->qx;
-                    float qy1 = k1->qy;
-                    float qz1 = k1->qz;
-                    float qw1 = k1->qw;
+                    const float q0[4] = {
+                        k0->qx, k0->qy, k0->qz, k0->qw
+                    };
+                    const float q1[4] = {
+                        k1->qx, k1->qy, k1->qz, k1->qw
+                    };
+
                     /*
-                     * Quaternion shortest path.
+                     * RenderWare HAnim interpola orientación con SLERP.
                      */
-                    float dot = k0->qx * qx1 + k0->qy * qy1 + k0->qz * qz1 + k0->qw * qw1;
-                    if (dot < 0.0f) {
-                        qx1 = -qx1;
-                        qy1 = -qy1;
-                        qz1 = -qz1;
-                        qw1 = -qw1;
-                    }
-                    quat[0] = k0->qx + t * (qx1 - k0->qx);
-                    quat[1] = k0->qy + t * (qy1 - k0->qy);
-                    quat[2] = k0->qz + t * (qz1 - k0->qz);
-                    quat[3] = k0->qw + t * (qw1 - k0->qw);
-                    /*
-                     * Normalizar.
-                     */
-                    float qlen = sqrtf(
-                        quat[0] * quat[0] +
-                        quat[1] * quat[1] +
-                        quat[2] * quat[2] +
-                        quat[3] * quat[3]
+                    quat_slerp(
+                        q0,
+                        q1,
+                        t,
+                        quat
                     );
-                    if (qlen > 0.000001f) {
-                        quat[0] /= qlen;
-                        quat[1] /= qlen;
-                        quat[2] /= qlen;
-                        quat[3] /= qlen;
-                    }
                     /*
                      * ------------------------------------------------
                      * Translation
@@ -3427,36 +3479,18 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
              * --------------------------------------------------------
              */
             Mat4 local_mat = bind_mat;
+
             if (animated) {
                 /*
-                 * La animación proporciona la rotación.
-                 * La posición del hueso se conserva desde el DFF,
-                 * excepto cuando el track proporciona traslación.
+                 * HAnim aplica al nodo la rotación Y la traslación
+                 * interpoladas del keyframe. No conservamos aquí la
+                 * posición de reposo del DFF.
                  */
-                float zero[3] = { 0.0f, 0.0f, 0.0f };
-                Mat4 anim_mat = mat4_from_pos_quat(
-                    zero,
-                    quat
-                );
-                local_mat = anim_mat;
-                /*
-                 * Mantener la posición del hueso
-                 * proveniente del skeleton.
-                 */
-                local_mat.m[12] = bind_mat.m[12];
-                local_mat.m[13] = bind_mat.m[13];
-                local_mat.m[14] = bind_mat.m[14];
-                /*
-                 * Root.
-                 *
-                 * Si es el root, sí usamos la traslación
-                 * proporcionada por la animación.
-                 */
-                if (bone.bone_id == 1000) {
-                    local_mat.m[12] = pos[0];
-                    local_mat.m[13] = pos[1];
-                    local_mat.m[14] = pos[2];
-                }
+                local_mat =
+                    mat4_from_pos_quat(
+                        pos,
+                        quat
+                    );
             }
             /*
              * --------------------------------------------------------
