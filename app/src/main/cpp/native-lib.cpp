@@ -4149,7 +4149,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
     g_player_yaw -= dx * SENS;
     g_cam_yaw = g_player_yaw;
 
-    g_cam_pitch += dy * SENS;
+    g_cam_pitch -= dy * SENS;
     g_cam_pitch = std::max(-1.0f, std::min(1.0f, g_cam_pitch));
 }
 
