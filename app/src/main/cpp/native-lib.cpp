@@ -1350,9 +1350,14 @@ static float segment_triangle_distance_sq(
 static bool player_collision_at(
     float px,
     float,
-    float pz
+    float pz,
+    Vec3* out_normal = nullptr
 ) {
     if (!g_player_col_model) return false;
+
+    if (out_normal) {
+        *out_normal = {0.0f, 0.0f, 0.0f};
+    }
 
     const float yaw_c = cosf(g_player_yaw);
     const float yaw_s = sinf(g_player_yaw);
@@ -1365,8 +1370,6 @@ static bool player_collision_at(
         };
     };
 
-    // PLAYER COL original: en este archivo son 2 esferas + 1 línea.
-    // Usamos almacenamiento fijo para evitar allocaciones por frame.
     Vec3 player_centers[8]{};
     float player_radii[8]{};
     size_t sphere_count = std::min<size_t>(
@@ -1380,10 +1383,7 @@ static bool player_collision_at(
             transform_local(g_player_col_model->spheres[i].center);
         player_radii[i] =
             std::max(0.01f, g_player_col_model->spheres[i].radius);
-        max_radius = std::max(
-            max_radius,
-            player_radii[i]
-        );
+        max_radius = std::max(max_radius, player_radii[i]);
     }
 
     Vec3 line_a{};
@@ -1391,12 +1391,8 @@ static bool player_collision_at(
     bool has_line = false;
 
     if (!g_player_col_model->lines.empty()) {
-        line_a = transform_local(
-            g_player_col_model->lines[0].a
-        );
-        line_b = transform_local(
-            g_player_col_model->lines[0].b
-        );
+        line_a = transform_local(g_player_col_model->lines[0].a);
+        line_b = transform_local(g_player_col_model->lines[0].b);
         has_line = true;
     }
 
@@ -1407,14 +1403,34 @@ static bool player_collision_at(
         std::floor(pz / g_col_grid.cell_size)
     );
 
-    // Las esferas de player tienen radio 0.5 en el COL real.
     const int cell_radius = std::max(
         1,
         static_cast<int>(
-            std::ceil((max_radius + 0.25f) /
-                      g_col_grid.cell_size)
+            std::ceil(
+                (max_radius + 0.25f) /
+                g_col_grid.cell_size
+            )
         )
     );
+
+    const auto set_triangle_normal = [&](Vec3 n, Vec3 sample) {
+        if (!out_normal) return;
+
+        if (vec3_dot(
+                {
+                    sample.x,
+                    sample.y,
+                    sample.z
+                },
+                n
+            ) < 0.0f) {
+            n.x = -n.x;
+            n.y = -n.y;
+            n.z = -n.z;
+        }
+
+        *out_normal = vec3_norm(n);
+    };
 
     for (int cx = center_cx - cell_radius;
          cx <= center_cx + cell_radius;
@@ -1439,7 +1455,9 @@ static bool player_collision_at(
 
                 Vec3 n = vec3_cross(e1, e2);
                 const float nlen = sqrtf(
-                    n.x*n.x + n.y*n.y + n.z*n.z
+                    n.x*n.x +
+                    n.y*n.y +
+                    n.z*n.z
                 );
                 if (nlen < 1e-6f) continue;
 
@@ -1447,11 +1465,9 @@ static bool player_collision_at(
                 n.y /= nlen;
                 n.z /= nlen;
 
-                // El movimiento horizontal no debe chocar contra
-                // superficies que son suelo/techo.
+                // Movimiento horizontal: suprimir suelo y techos.
                 if (fabsf(n.y) > 0.70f) continue;
 
-                // Las esferas son la parte principal del volumen corporal.
                 for (size_t i = 0; i < sphere_count; ++i) {
                     const float dist_sq =
                         point_triangle_distance_sq(
@@ -1461,13 +1477,18 @@ static bool player_collision_at(
 
                     const float r = player_radii[i];
                     if (dist_sq <= r * r) {
+                        set_triangle_normal(
+                            n,
+                            {
+                                player_centers[i].x - tri.a.x,
+                                player_centers[i].y - tri.a.y,
+                                player_centers[i].z - tri.a.z
+                            }
+                        );
                         return true;
                     }
                 }
 
-                // La línea original cubre la zona inferior del cuerpo.
-                // Basta comprobar si atraviesa la cara; las esferas
-                // aportan el volumen en los extremos.
                 if (has_line) {
                     const Vec3 line_dir = {
                         line_b.x - line_a.x,
@@ -1482,6 +1503,14 @@ static bool player_collision_at(
                             tri,
                             hit_t
                         )) {
+                        set_triangle_normal(
+                            n,
+                            {
+                                line_a.x - tri.a.x,
+                                line_a.y - tri.a.y,
+                                line_a.z - tri.a.z
+                            }
+                        );
                         return true;
                     }
                 }
@@ -1489,7 +1518,7 @@ static bool player_collision_at(
         }
     }
 
-    // Colisiones esféricas de objetos del COL instanciados.
+    // Colisiones esfera-esfera de las instancias COL.
     for (const auto& object_sphere : g_col_spheres_world) {
         for (size_t i = 0; i < sphere_count; ++i) {
             const Vec3 d = {
@@ -1497,10 +1526,26 @@ static bool player_collision_at(
                 player_centers[i].y - object_sphere.first.y,
                 player_centers[i].z - object_sphere.first.z
             };
+
             const float radius =
                 player_radii[i] + object_sphere.second;
 
             if (vec3_dot(d, d) <= radius * radius) {
+                if (out_normal) {
+                    Vec3 n = d;
+                    const float len =
+                        sqrtf(vec3_dot(n, n));
+
+                    if (len > 1e-6f) {
+                        n.x /= len;
+                        n.y /= len;
+                        n.z /= len;
+                    } else {
+                        n = {1.0f, 0.0f, 0.0f};
+                    }
+
+                    *out_normal = n;
+                }
                 return true;
             }
         }
@@ -1511,17 +1556,22 @@ static bool player_collision_at(
                 line_b.y - line_a.y,
                 line_b.z - line_a.z
             };
-            const float len_sq = vec3_dot(seg, seg);
 
+            const float len_sq = vec3_dot(seg, seg);
             float u = 0.0f;
+
             if (len_sq > 1e-8f) {
                 const Vec3 to_sphere = {
                     object_sphere.first.x - line_a.x,
                     object_sphere.first.y - line_a.y,
                     object_sphere.first.z - line_a.z
                 };
+
                 u = vec3_dot(to_sphere, seg) / len_sq;
-                u = std::max(0.0f, std::min(1.0f, u));
+                u = std::max(
+                    0.0f,
+                    std::min(1.0f, u)
+                );
             }
 
             const Vec3 closest = {
@@ -1529,15 +1579,37 @@ static bool player_collision_at(
                 line_a.y + seg.y * u,
                 line_a.z + seg.z * u
             };
+
             const Vec3 d = {
                 closest.x - object_sphere.first.x,
                 closest.y - object_sphere.first.y,
                 closest.z - object_sphere.first.z
             };
+
             const float radius =
                 max_radius + object_sphere.second;
 
             if (vec3_dot(d, d) <= radius * radius) {
+                if (out_normal) {
+                    Vec3 n = {
+                        object_sphere.first.x - closest.x,
+                        object_sphere.first.y - closest.y,
+                        object_sphere.first.z - closest.z
+                    };
+
+                    const float len =
+                        sqrtf(vec3_dot(n, n));
+
+                    if (len > 1e-6f) {
+                        n.x /= len;
+                        n.y /= len;
+                        n.z /= len;
+                    } else {
+                        n = {1.0f, 0.0f, 0.0f};
+                    }
+
+                    *out_normal = n;
+                }
                 return true;
             }
         }
@@ -1994,38 +2066,69 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         const float wanted_x = g_player_pos.x + step_dx;
         const float wanted_z = g_player_pos.z + step_dz;
 
-        if (!hit_wall(
-                g_player_pos.x,
-                current_waist_y,
-                g_player_pos.z,
+        Vec3 collision_normal{};
+        if (!player_collision_at(
                 wanted_x,
                 current_waist_y,
-                wanted_z)) {
+                wanted_z,
+                &collision_normal
+            )) {
             g_player_pos.x = wanted_x;
             g_player_pos.z = wanted_z;
             continue;
         }
 
-        // El juego permite continuar por el eje que esté libre,
-        // produciendo el deslizamiento natural contra la pared.
-        if (!hit_wall(
-                g_player_pos.x,
-                current_waist_y,
-                g_player_pos.z,
-                wanted_x,
-                current_waist_y,
-                g_player_pos.z)) {
-            g_player_pos.x = wanted_x;
-        }
+        // Resolver el contacto proyectando el desplazamiento sobre
+        // el plano tangente de la superficie. Esto permite deslizarse
+        // por una pared en vez de quedar pegado a ella.
+        Vec3 horizontal_normal = {
+            collision_normal.x,
+            0.0f,
+            collision_normal.z
+        };
 
-        if (!hit_wall(
-                g_player_pos.x,
-                current_waist_y,
-                g_player_pos.z,
-                g_player_pos.x,
-                current_waist_y,
-                wanted_z)) {
-            g_player_pos.z = wanted_z;
+        const float normal_len = sqrtf(
+            horizontal_normal.x * horizontal_normal.x +
+            horizontal_normal.z * horizontal_normal.z
+        );
+
+        if (normal_len > 1e-5f) {
+            horizontal_normal.x /= normal_len;
+            horizontal_normal.z /= normal_len;
+
+            const float into_wall =
+                step_dx * horizontal_normal.x +
+                step_dz * horizontal_normal.z;
+
+            float slide_dx = step_dx;
+            float slide_dz = step_dz;
+
+            if (into_wall < 0.0f) {
+                slide_dx -=
+                    horizontal_normal.x * into_wall;
+                slide_dz -=
+                    horizontal_normal.z * into_wall;
+            }
+
+            const float slide_len_sq =
+                slide_dx * slide_dx +
+                slide_dz * slide_dz;
+
+            if (slide_len_sq > 1e-8f) {
+                const float slide_x =
+                    g_player_pos.x + slide_dx;
+                const float slide_z =
+                    g_player_pos.z + slide_dz;
+
+                if (!player_collision_at(
+                        slide_x,
+                        current_waist_y,
+                        slide_z
+                    )) {
+                    g_player_pos.x = slide_x;
+                    g_player_pos.z = slide_z;
+                }
+            }
         }
     }
 
