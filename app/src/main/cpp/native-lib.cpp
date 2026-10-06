@@ -3222,7 +3222,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 return nullptr;
             }(),
             g_anim_time,
-            dt,
+            dt * input_strength,
             &root_delta_local
         );
 
@@ -3248,15 +3248,12 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             ? root_distance / std::max(dt, 0.0001f)
             : MOVE_SPEED_FALLBACK;
 
-    // El control original aumenta la velocidad cuanto más se aleja el
-    // stick del centro. Mantenemos la animación fija en Walk_* como pide
-    // el port, pero conservamos la magnitud analógica para no dar velocidad
-    // máxima con un toque mínimo del joystick.
-    const float analog_speed =
-        movement_speed * input_strength;
-
-    const float move_dx = vel_xz.x * analog_speed * dt;
-    const float move_dz = vel_xz.z * analog_speed * dt;
+    // La magnitud del stick ya se aplicó al tiempo de la animación/root
+    // motion. No volver a multiplicarla aquí: de lo contrario el jugador
+    // se desplaza al cuadrado de la intensidad y los pies vuelven a
+    // desincronizarse.
+    const float move_dx = vel_xz.x * movement_speed * dt;
+    const float move_dz = vel_xz.z * movement_speed * dt;
 
     // Resolver el desplazamiento en pequeños pasos evita atravesar
     // superficies finas cuando un frame produce un movimiento grande.
