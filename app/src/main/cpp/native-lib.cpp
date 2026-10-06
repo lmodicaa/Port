@@ -496,7 +496,7 @@ static int    g_height            = 0;
 
 // Estado 3ra Persona
 static Vec3  g_player_pos = {0.f, -5.f, 0.f};
-static float g_cash_y_offset = 1.0f;
+static float g_cash_y_offset = 0.0f;
 
 // El modelo Cash usa un eje frontal distinto al del runtime:
 // el frente del DFF debe girarse 90 grados para alinearlo con
@@ -2511,7 +2511,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     g_debug_anim_idx = -1;
     g_cash_skinning_enabled = false;
     g_cash_skin_convention = -1;
-    g_cash_pos_adjust = {0.0f, 1.0f, 0.0f};
+    g_cash_pos_adjust = {0.0f, 0.0f, 0.0f};
     g_cash_rot_adjust_deg = {0.0f, -91.0f, 180.0f};
 }
 
