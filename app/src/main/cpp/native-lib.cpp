@@ -4297,9 +4297,11 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
 
             if (g_previous_anim && anim &&
                 g_previous_anim != anim) {
+                const std::string anim_name_lower =
+                    to_lower(anim->name);
                 const bool turn_animation =
-                    anim->name == "Stand_Turn" ||
-                    anim->name == "Stand_Turn_Right";
+                    anim_name_lower.find("turn") !=
+                    std::string::npos;
                 if (turn_animation) {
                     // El giro debe arrancar inmediatamente; el crossfade de
                     // MOVE_TRANS_SPEED se nota como input lag en esta animación.
