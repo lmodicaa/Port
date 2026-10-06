@@ -135,9 +135,6 @@ class MainActivity : Activity() {
         val container = findViewById<android.widget.FrameLayout>(R.id.main_container)
         container.addView(glView, 0)
         
-        findViewById<android.widget.Button>(R.id.btn_jump).setOnClickListener {
-            renderer.nativeJump()
-        }
 
         findViewById<android.widget.Button>(R.id.btn_recenter).setOnClickListener {
             renderer.nativeRecenterCamera()
