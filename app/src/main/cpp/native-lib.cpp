@@ -2520,11 +2520,58 @@ static void load_txd_to_gpu(const char* path) {
         glGenTextures(1, &t_id);
         glBindTexture(GL_TEXTURE_2D, t_id);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex.width, tex.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, tex.rgba.data());
+
+        // Respetar el FilterAddress del TXD original en lugar de forzar
+        // LINEAR + REPEAT para todas las texturas.
+        const uint8_t filter = tex.filter_mode;
+        GLenum min_filter = GL_LINEAR_MIPMAP_LINEAR;
+        GLenum mag_filter = GL_LINEAR;
+
+        switch (filter) {
+            case 1: // rwFILTERNEAREST
+                min_filter = GL_NEAREST;
+                mag_filter = GL_NEAREST;
+                break;
+            case 2: // rwFILTERLINEAR
+                min_filter = GL_LINEAR;
+                mag_filter = GL_LINEAR;
+                break;
+            case 3: // rwFILTERMIPNEAREST
+                min_filter = GL_NEAREST_MIPMAP_NEAREST;
+                mag_filter = GL_NEAREST;
+                break;
+            case 4: // rwFILTERMIPLINEAR
+                min_filter = GL_LINEAR_MIPMAP_NEAREST;
+                mag_filter = GL_LINEAR;
+                break;
+            case 5: // rwFILTERLINEARMIPNEAREST
+                min_filter = GL_NEAREST_MIPMAP_LINEAR;
+                mag_filter = GL_LINEAR;
+                break;
+            case 6: // rwFILTERLINEARMIPLINEAR
+                min_filter = GL_LINEAR_MIPMAP_LINEAR;
+                mag_filter = GL_LINEAR;
+                break;
+            default:
+                break;
+        }
+
         glGenerateMipmap(GL_TEXTURE_2D);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag_filter);
+
+        const auto address_mode = [](uint8_t mode) -> GLenum {
+            switch (mode) {
+                case 2: return GL_MIRRORED_REPEAT;
+                case 3:
+                case 4: return GL_CLAMP_TO_EDGE;
+                case 1:
+                default: return GL_REPEAT;
+            }
+        };
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, address_mode(tex.address_u));
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, address_mode(tex.address_v));
         g_tex_map[to_lower(tex.name)] = t_id;
         LOGI("Cargada textura GPU: %s (%dx%d)", tex.name.c_str(), tex.width, tex.height);
     }
