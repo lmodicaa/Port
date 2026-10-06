@@ -54,9 +54,13 @@ struct DFFModel {
     std::vector<MaterialData> materials;      // datos completos de material
     WorldLighting world;                      // sólo poblado por bsp_load()
     std::vector<float> inverse_bind_matrices; // float[16] por hueso local de Skin
-    // Skin local bone index -> FrameList index.
-    // Es la tabla usada para resolver los índices de vértice del plugin Skin.
+    // Skin/HAnim node index -> FrameList index.
+    // Se resuelve por nodeID, igual que RenderWare al adjuntar HAnim.
     std::vector<uint8_t> skin_bone_to_frame;
+
+    // FrameList index usado por el Atomic que instancia esta geometría.
+    // 0xFFFFFFFF = no encontrado/no disponible.
+    uint32_t atomic_frame_index = 0xFFFFFFFF;
     std::map<uint32_t, uint32_t> bone_id_to_index; // HAnim: bone_id -> FrameList
     std::vector<DFFBone> bones; // FrameList hierarchy
     bool valid = false;
