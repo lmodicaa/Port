@@ -754,70 +754,39 @@ static std::vector<uint8_t> read_asset(const char* path) {
 // Retorna -1e9 si no hay suelo.
 static float find_floor(float px, float search_y, float pz) {
     float best = -1e9f;
-    Vec3 ray_o = {px, search_y, pz};
-    Vec3 ray_d = {0, -1, 0};  // raycast vertical hacia abajo
+    Vec3 ray_o  = {px, search_y, pz};
+    Vec3 ray_d  = {0, -1, 0};  // raycast hacia abajo
 
     const std::vector<Tri>* tris = g_col_grid.get(px, pz);
     if (!tris) return best;
 
     for (const auto& tri : *tris) {
-        Vec3 e1 = {
-            tri.b.x - tri.a.x,
-            tri.b.y - tri.a.y,
-            tri.b.z - tri.a.z
-        };
-        Vec3 e2 = {
-            tri.c.x - tri.a.x,
-            tri.c.y - tri.a.y,
-            tri.c.z - tri.a.z
-        };
-
-        // El BSP tiene winding inconsistente. Para decidir si una
-        // superficie puede ser suelo solo importa la inclinación,
-        // no hacia qué lado apunta la normal.
+        Vec3 e1 = {tri.b.x-tri.a.x, tri.b.y-tri.a.y, tri.b.z-tri.a.z};
+        Vec3 e2 = {tri.c.x-tri.a.x, tri.c.y-tri.a.y, tri.c.z-tri.a.z};
+        
+        // Calcular normal
         Vec3 n = vec3_cross(e1, e2);
-        const float nlen = sqrtf(
-            n.x*n.x + n.y*n.y + n.z*n.z
-        );
-        if (nlen < 1e-6f) continue;
-
-        n.x /= nlen;
-        n.y /= nlen;
-        n.z /= nlen;
-
-        if (fabsf(n.y) < 0.30f) {
-            // Más vertical que horizontal: pared/objeto, no suelo.
-            continue;
-        }
-
-        Vec3 h = vec3_cross(ray_d, e2);
-        const float det = vec3_dot(e1, h);
+        float nlen = sqrtf(n.x*n.x + n.y*n.y + n.z*n.z);
+        if (nlen > 0.0f) { n.x/=nlen; n.y/=nlen; n.z/=nlen; }
+        
+        // Si no mira hacia arriba (ej. pared o techo), ignorarlo como suelo
+        if (n.y < 0.3f) continue;
+        
+        Vec3 h  = vec3_cross(ray_d, e2);
+        float det = vec3_dot(e1, h);
         if (fabsf(det) < 1e-6f) continue;
-
-        const float inv_det = 1.0f / det;
-        Vec3 q;
-        Vec3 ray_to_a = {
-            ray_o.x - tri.a.x,
-            ray_o.y - tri.a.y,
-            ray_o.z - tri.a.z
-        };
-
-        const float u = vec3_dot(ray_to_a, h) * inv_det;
+        float inv_det = 1.0f / det;
+        Vec3 s   = {ray_o.x-tri.a.x, ray_o.y-tri.a.y, ray_o.z-tri.a.z};
+        float u  = vec3_dot(s, h) * inv_det;
         if (u < 0.0f || u > 1.0f) continue;
-
-        q = vec3_cross(ray_to_a, e1);
-        const float v = vec3_dot(ray_d, q) * inv_det;
+        Vec3 q   = vec3_cross(s, e1);
+        float v  = vec3_dot(ray_d, q) * inv_det;
         if (v < 0.0f || u + v > 1.0f) continue;
-
-        const float t = vec3_dot(e2, q) * inv_det;
-        if (t < 0.0f || t > 200.0f) continue;
-
-        const float hit_y = search_y - t;
-        if (hit_y > best) {
-            best = hit_y;
-        }
+        float t  = vec3_dot(e2, q) * inv_det;
+        if (t < 0.0f || t > 200.f) continue;  // Solo detectar suelo HACIA ABAJO
+        float hit_y = search_y - t;
+        if (hit_y > best) best = hit_y;
     }
-
     return best;
 }
 
@@ -1253,37 +1222,13 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     g_vel_y += GRAVITY * dt;
     g_player_pos.y += g_vel_y * dt;
 
-    // El rayo debe comenzar por encima del jugador. Si empezara en
-    // la cintura actual y el jugador ya estuviera dentro del piso,
-    // nunca podría encontrar una superficie que está por encima del origen.
-    const float floor_search_y =
-        g_player_pos.y + PLAYER_HEIGHT + 2.0f;
-
-    float floor_y = find_floor(
-        g_player_pos.x,
-        floor_search_y,
-        g_player_pos.z
-    );
-
-    const bool was_on_ground = g_on_ground;
-
-    if (floor_y > -1e8f &&
-        g_player_pos.y <= floor_y + 0.08f) {
-        // Snap suave al suelo para evitar pequeñas penetraciones por dt.
+    float floor_y = find_floor(g_player_pos.x, waist_y, g_player_pos.z);
+    if (g_player_pos.y < floor_y) {
         g_player_pos.y = floor_y;
         g_vel_y = 0.f;
         g_on_ground = true;
     } else {
         g_on_ground = false;
-    }
-
-    if (was_on_ground != g_on_ground) {
-        LOGI(
-            "FLOOR STATE: grounded=%d playerY=%.3f floorY=%.3f",
-            g_on_ground ? 1 : 0,
-            g_player_pos.y,
-            floor_y
-        );
     }
 
     // ── Cámara Orbit ───────────────────────────────────────────────────────
