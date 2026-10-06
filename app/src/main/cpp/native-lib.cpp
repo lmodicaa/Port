@@ -852,6 +852,7 @@ struct PlayerControlConfig {
     float crouch_sideways_speed = 1.20f;
 
     float aim_axis_width = 10.0f;
+    float move_axis_width = 10.0f;
     float aim_zones[10] = {3.0f, 8.0f, 12.0f, 18.0f, 25.0f, 35.0f, 45.0f, 57.0f, 76.0f, 125.0f};
     float vertical_aim_limit = 9.30f;
     float turn_pause = 0.27f;
@@ -1105,6 +1106,8 @@ static void parse_entity_type_data(
                 parts >>
                     g_player_control.move_walk_threshold >>
                     g_player_control.move_run_threshold;
+            } else if (lower_key == "move_axis_width") {
+                parts >> g_player_control.move_axis_width;
             } else if (lower_key == "move_trans_speed") {
                 parts >> g_player_control.move_transition_speed;
             } else if (lower_key == "sneak_walk_speed") {
@@ -3599,12 +3602,38 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             const float local_right =
                 vel_xz.x * player_right.x + vel_xz.z * player_right.z;
 
+            // MOVE_AXIS_WIDTH del PC: solo se fuerza un eje cardinal
+            // cuando el stick está dentro de 10 grados de ese eje.
+            // Fuera de esa ventana conservamos el eje dominante para las
+            // animaciones cardinales disponibles.
+            const float move_angle =
+                atan2f(local_right, local_fwd);
+            const float move_step = 3.14159265359f / 2.0f;
+            const float nearest_move =
+                std::round(move_angle / move_step) * move_step;
+            const float move_delta =
+                atan2f(
+                    sinf(move_angle - nearest_move),
+                    cosf(move_angle - nearest_move)
+                );
+            const bool snapped_move =
+                fabsf(move_delta) <=
+                g_player_control.move_axis_width *
+                    3.14159265359f / 180.0f;
+
+            float direction_fwd = local_fwd;
+            float direction_right = local_right;
+            if (snapped_move) {
+                direction_fwd = cosf(nearest_move);
+                direction_right = sinf(nearest_move);
+            }
+
             const bool use_forward_axis =
-                std::fabs(local_fwd) >= std::fabs(local_right);
+                std::fabs(direction_fwd) >= std::fabs(direction_right);
             const char* direction =
                 use_forward_axis
-                    ? (local_fwd >= 0.0f ? "Fwd" : "Bkw")
-                    : (local_right >= 0.0f ? "Right" : "Left");
+                    ? (direction_fwd >= 0.0f ? "Fwd" : "Bkw")
+                    : (direction_right >= 0.0f ? "Right" : "Left");
 
             // Tres zonas de intensidad: Sneak -> Walk -> Run.
             const char* family = nullptr;
