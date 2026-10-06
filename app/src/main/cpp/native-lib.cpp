@@ -750,6 +750,9 @@ static float g_anim_transition_time = 0.0f;
 static float g_cam_yaw    = 0.0f;
 static float g_cam_pitch  = -0.2f;
 static float g_cam_dist   = 3.0f;
+static const Animation* g_turn_anim = nullptr;
+static bool g_turn_gesture_active = false;
+static float g_turn_gesture_amount = 0.0f;
 
 // El yaw del actor es la orientación real. El mouse/touch del PC gira
 // continuamente; no se fuerza una animación de giro por cada gesto.
@@ -3572,9 +3575,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             if (family) {
                 std::string wanted = std::string(family) + direction;
                 anim = find_anim(wanted.c_str());
+            } else if (g_turn_gesture_active && g_turn_anim) {
+                anim = g_turn_anim;
             } else {
-                // Sin movimiento: mantener la postura de espera. El yaw del
-                // actor ya responde directamente al mouse/touch.
                 anim = find_anim("Stand");
                 if (!anim) anim = find_anim("Stand_Idle");
             }
@@ -4389,8 +4392,30 @@ JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jfloat dy) {
     const float SENS = 0.003f;
 
-    // Arrastrar hacia la derecha hace girar la cámara/personaje hacia
-    // la derecha; arrastrar hacia arriba hace mirar hacia arriba.
+    if (dx == 0.0f) {
+        g_turn_gesture_active = false;
+        g_turn_gesture_amount = 0.0f;
+        g_turn_anim = nullptr;
+    } else {
+        g_turn_gesture_amount += fabsf(dx * SENS);
+        if (!g_turn_gesture_active && g_turn_gesture_amount >= 0.01f) {
+            g_turn_gesture_active = true;
+            const char* wanted = dx > 0.0f ? "Stand_Turn_Right" : "Stand_Turn";
+            const std::string query = to_lower(wanted);
+            g_turn_anim = nullptr;
+            for (const auto& pair : g_anims) {
+                if (to_lower(pair.first) == query) {
+                    g_turn_anim = &pair.second;
+                    break;
+                }
+            }
+            if (g_turn_anim) {
+                LOGI("TURN GESTURE: dx=%.3f anim=%s", dx, g_turn_anim->name.c_str());
+            } else {
+                LOGI("TURN GESTURE: dx=%.3f anim=%s NOT FOUND", dx, wanted);
+            }
+        }
+    }
     g_player_yaw -= dx * SENS;
     g_cam_yaw = g_player_yaw;
 
