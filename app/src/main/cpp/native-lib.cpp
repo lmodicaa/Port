@@ -890,7 +890,6 @@ static bool g_sprint_active = false;
 // CPlayerTypeData; aquí mantenemos esa sensación sin ralentizar el IFP:
 // la animación sigue a velocidad normal y solo la velocidad física entra
 // y sale progresivamente.
-static Vec3 g_locomotion_velocity = {0.0f, 0.0f, 0.0f};
 
 static bool sprint_is_active() {
     return g_sprint_active;
@@ -3223,7 +3222,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     g_locomotion_special_anim = nullptr;
     g_locomotion_was_moving = false;
     g_last_move_dir = {0.0f, 0.0f, -1.0f};
-    g_locomotion_velocity = {0.0f, 0.0f, 0.0f};
     // Empezamos en bind pose; después de validar Skin se activa el IFP.
     g_debug_anim_idx = -1;
     g_cash_skinning_enabled = false;
@@ -3455,51 +3453,31 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         (special_motion_active ? g_last_move_dir :
                                  Vec3{0.0f, 0.0f, 0.0f});
 
-    // La aceleración del movimiento real se hace aparte del IFP. Esto evita
-    // alterar la velocidad de reproducción de Walk_Fwd y mantiene los pies
-    // coherentes con el ciclo, mientras el cuerpo tarda un instante en
-    // adquirir/perder velocidad como en el control original.
-    const float acceleration_time =
-        std::max(
-            0.08f,
-            std::min(
-                0.30f,
-                g_player_control.move_transition_speed
-            )
-        );
+    // El desplazamiento horizontal sale directamente del root-motion del IFP.
+    // No aplicamos un filtro físico adicional: MOVE_TRANS_SPEED (0.20 s) del
+    // juego original controla la transición visual entre animaciones, no una
+    // aceleración física inventada para el actor.
+    const bool special_motion_active =
+        g_locomotion_special_anim != nullptr;
 
-    const float speed_blend =
-        1.0f - expf(-dt / acceleration_time);
+    const Vec3 movement_dir =
+        currently_moving ? vel_xz :
+        (special_motion_active ? g_last_move_dir :
+                                 Vec3{0.0f, 0.0f, 0.0f});
 
-    Vec3 target_velocity = {
-        target_movement_dir.x * target_movement_speed,
-        0.0f,
-        target_movement_dir.z * target_movement_speed
-    };
-
-    g_locomotion_velocity.x +=
-        (target_velocity.x - g_locomotion_velocity.x) *
-        speed_blend;
-    g_locomotion_velocity.z +=
-        (target_velocity.z - g_locomotion_velocity.z) *
-        speed_blend;
-
-    const float locomotion_velocity_len = sqrtf(
-        g_locomotion_velocity.x * g_locomotion_velocity.x +
-        g_locomotion_velocity.z * g_locomotion_velocity.z
+    const float movement_dir_len = sqrtf(
+        movement_dir.x * movement_dir.x +
+        movement_dir.z * movement_dir.z
     );
 
-    // Evitar microdesplazamientos residuales cuando el stick ya se soltó.
-    if (!currently_moving &&
-        !special_motion_active &&
-        locomotion_velocity_len < 0.02f) {
-        g_locomotion_velocity = {0.0f, 0.0f, 0.0f};
-    }
-
     const float move_dx =
-        g_locomotion_velocity.x * dt;
+        movement_dir_len > 0.0001f
+            ? (movement_dir.x / movement_dir_len) * scaled_root_distance
+            : 0.0f;
     const float move_dz =
-        g_locomotion_velocity.z * dt;
+        movement_dir_len > 0.0001f
+            ? (movement_dir.z / movement_dir_len) * scaled_root_distance
+            : 0.0f;
 
     // Resolver el desplazamiento en pequeños pasos evita atravesar
     // superficies finas cuando un frame produce un movimiento grande.
