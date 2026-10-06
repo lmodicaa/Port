@@ -751,15 +751,8 @@ static float g_cam_yaw    = 0.0f;
 static float g_cam_pitch  = -0.2f;
 static float g_cam_dist   = 3.0f;
 
-// Giro visual solicitado por el control de apuntado.
-// La animación nunca modifica g_player_yaw: el giro físico del actor sigue
-// siendo independiente, como en el juego original.
-static int g_turn_anim_request = 0; // -1 izquierda, +1 derecha
-// Animación de giro actualmente en reproducción. Se deja terminar aunque
-// el dedo siga apoyado, tal como una animación de transición no-loop.
-static int g_turn_anim_active = 0; // -1 izquierda, +1 derecha
-static float g_turn_input_accum = 0.0f;
-static float g_turn_anim_start_yaw = 0.0f;
+// El yaw del actor es la orientación real. El mouse/touch del PC gira
+// continuamente; no se fuerza una animación de giro por cada gesto.
 
 // Movimiento joystick (actualizados desde Kotlin)
 static float g_move_fwd   = 0.f;  // -1..1  (adelante/atrás)
@@ -3580,24 +3573,11 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 std::string wanted = std::string(family) + direction;
                 anim = find_anim(wanted.c_str());
             } else {
-                // Sin desplazamiento, reproducir la animación de giro original
-                // completa. No se reinicia mientras el dedo permanece apoyado.
-                if (g_turn_anim_active == 0 &&
-                    g_turn_anim_request != 0) {
-                    g_turn_anim_active = g_turn_anim_request;
-                    g_turn_anim_request = 0;
-                }
-
-                if (g_turn_anim_active != 0) {
-                    anim = find_anim(
-                        g_turn_anim_active > 0
-                            ? "Stand_Turn_Right"
-                            : "Stand_Turn_Left"
-                    );
-                }
-
+                // Sin movimiento: postura de espera. El giro del mouse
+                // ya se aplica continuamente a g_player_yaw, como en PC.
+                anim = find_anim("Stand");
                 if (!anim) {
-                    anim = find_anim("Stand");
+                    anim = find_anim("Stand_Idle");
                 }
             }
 
@@ -4419,27 +4399,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeMove(JNIEnv*, jobject, jfloat fwd, j
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jfloat dy) {
     const float SENS = 0.003f;
-
-    // El arrastre horizontal también alimenta el estado visual de giro.
-    // Importante: nativeLook recibe muchos eventos mientras el dedo sigue
-    // apoyado. No debemos reiniciar Stand_Turn_* en cada evento; la animación
-    // original es una transición de giro, no un loop.
-    if (std::fabs(dx) > 0.5f) {
-        const int turn_sign = (dx > 0.0f) ? 1 : -1;
-
-        // Sólo el primer movimiento horizontal del gesto dispara la
-        // animación. Los siguientes eventos mantienen el giro físico,
-        // pero no vuelven a iniciar Stand_Turn_* cuando termina.
-        if (!g_turn_gesture_consumed) {
-            g_turn_anim_request = turn_sign;
-            g_turn_input_sign = turn_sign;
-            g_turn_gesture_consumed = true;
-        }
-    } else if (dx == 0.0f && dy == 0.0f) {
-        // Android usa este par cero como fin del gesto derecho.
-        g_turn_input_sign = 0;
-        g_turn_gesture_consumed = false;
-    }
 
     // Arrastrar hacia la derecha hace girar la cámara/personaje hacia
     // la derecha; arrastrar hacia arriba hace mirar hacia arriba.
