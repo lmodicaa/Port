@@ -9,7 +9,8 @@ add_library(manhunt SHARED
         dff_loader.cpp
         bsp_loader.cpp
         inst_loader.cpp
-        ifp_loader.cpp)
+        ifp_loader.cpp
+        col_loader.cpp)
 
 find_library(log-lib log)
 find_library(android-lib android)
