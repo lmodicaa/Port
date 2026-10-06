@@ -17,7 +17,7 @@
 #include <map>
 #include <dirent.h>
 #include <ctime>
-#include <chrono>
+#include <time.h>
 #include "txd_loader.h"
 #include "dff_loader.h"
 #include "inst_loader.h"
@@ -4442,9 +4442,16 @@ Java_com_manhunt_port_ManhuntRenderer_nativeMove(JNIEnv*, jobject, jfloat fwd, j
 // rota al personaje y la cámara permanece detrás de él. No dejamos que
 // la cámara orbite libremente alrededor de Cash.
 JNIEXPORT void JNICALL
-static std::chrono::steady_clock::time_point g_last_aim_update;
+static double g_last_aim_update = 0.0;
 static bool g_aim_clock_started = false;
 static float g_aim_hold_time = 0.0f;
+
+static double aim_time_seconds() {
+    struct timespec ts{};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<double>(ts.tv_sec) +
+           static_cast<double>(ts.tv_nsec) * 1.0e-9;
+}
 
 static float aim_zone_speed(float stick_distance, bool vertical) {
     const float dead = std::max(0.001f, g_player_control.stick_dead_zone);
@@ -4475,10 +4482,10 @@ static float snap_aim_angle(float angle) {
 
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_x, jfloat stick_y) {
-    const auto now = std::chrono::steady_clock::now();
+    const double now = aim_time_seconds();
     float dt = 0.016f;
     if (g_aim_clock_started) {
-        dt = std::chrono::duration<float>(now - g_last_aim_update).count();
+        dt = static_cast<float>(now - g_last_aim_update);
         dt = std::max(0.001f, std::min(0.05f, dt));
     }
     g_last_aim_update = now;
