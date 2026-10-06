@@ -708,7 +708,7 @@ static float g_cash_y_offset = 0.0f;
 // el frente del DFF debe girarse 90 grados para alinearlo con
 // el forward del jugador (-Z en yaw=0).
 static constexpr float CASH_MODEL_YAW_OFFSET = -1.57079632679f;
-static Vec3 g_cash_pos_adjust = {0.0f, 0.0f, 0.0f};
+static Vec3 g_cash_pos_adjust = {0.0f, 1.0f, 0.0f};
 static Vec3 g_cash_rot_adjust_deg = {0.0f, -91.0f, 180.0f};
 
 static Mat4 mat4_rotate_x(float angle) {
@@ -2865,7 +2865,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     g_debug_anim_idx = -1;
     g_cash_skinning_enabled = false;
     g_cash_skin_convention = -1;
-    g_cash_pos_adjust = {0.0f, 0.0f, 0.0f};
+    g_cash_pos_adjust = {0.0f, 1.0f, 0.0f};
     g_cash_rot_adjust_deg = {0.0f, -91.0f, 180.0f};
 }
 
