@@ -775,7 +775,6 @@ static bool g_sneak_pressed = false;
 static float  g_vel_y    = 0.f;
 static bool   g_on_ground= false;
 static const float GRAVITY        = -20.0f;
-// JUMP_FORWARD_VELOCITY no se usa como velocidad de locomoción.
 // Sólo queda como respaldo mientras una animación no tenga root-motion.
 static const float MOVE_SPEED_FALLBACK = 6.5f;
 
@@ -4947,13 +4946,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeSetCashTransform(
     g_cash_rot_adjust_deg = {rx, ry, rz};
 }
 
-JNIEXPORT void JNICALL
-Java_com_manhunt_port_ManhuntRenderer_nativeJump(JNIEnv*, jobject) {
-    if (g_on_ground) {
-        g_vel_y = 8.0f;
-        g_on_ground = false;
-    }
-}
 
 // Mantener compatibilidad con nativeDrag/nativeScale anteriores (los elimino)
 
