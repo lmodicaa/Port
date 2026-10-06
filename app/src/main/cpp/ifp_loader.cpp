@@ -1,113 +1,702 @@
 #include "ifp_loader.h"
-#include <android/log.h>
+
 #include <cstring>
+#include <stdexcept>
+#include <string>
+#include <map>
+#include <vector>
+#include <android/log.h>
 
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "Port-IFP", __VA_ARGS__)
+#define LOG_TAG "Port-IFP"
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
-std::map<std::string, Animation> load_ifp(const uint8_t* data, size_t size) {
-    std::map<std::string, Animation> anims;
-    if (size < 16) return anims;
-    
-    size_t pos = 0;
-    auto read_fourcc = [&](size_t offset) -> std::string {
-        if (offset + 4 > size) return "";
-        char buf[5] = {0};
-        std::memcpy(buf, data + offset, 4);
-        return std::string(buf);
-    };
-    auto read_u32 = [&](size_t offset) -> uint32_t {
-        if (offset + 4 > size) return 0;
-        uint32_t val;
-        std::memcpy(&val, data + offset, 4);
-        return val;
-    };
+class Reader2 {
+public:
+    Reader2(const uint8_t* data, size_t size)
+        : data_(data), size_(size), pos_(0) {}
 
-    std::string magic = read_fourcc(pos);
-    if (magic != "ANCT") return anims;
-    pos += 8; // ANCT + 04 00 00 00
+    size_t pos() const {
+        return pos_;
+    }
 
-    while (pos + 8 <= size) {
-        std::string type = read_fourcc(pos);
-        uint32_t sz = read_u32(pos + 4);
-        pos += 8;
-        
-        if (type == "BLOC") {
-            // BLOC string name
-            pos += sz; 
-        } else if (type == "ANPK") {
-            size_t anpk_end = pos + sz;
-            
-            std::string subtype = read_fourcc(pos);
-            uint32_t subsz = read_u32(pos + 4);
-            pos += 8;
-            
-            Animation current_anim;
-            if (subtype == "NAME") {
-                std::string name(reinterpret_cast<const char*>(data + pos), subsz);
-                while(!name.empty() && name.back() == '\0') name.pop_back();
-                current_anim.name = name;
-                pos += subsz;
-            }
-            
-            uint32_t num_bones = read_u32(pos);
-            uint32_t unk_size = read_u32(pos + 4);
-            std::memcpy(&current_anim.duration, data + pos + 8, 4);
-            pos += 12;
-            
-            for (uint32_t i = 0; i < num_bones; i++) {
-                if (read_fourcc(pos) == "SEQU") {
-                    pos += 4;
-                    uint16_t bone_id; std::memcpy(&bone_id, data + pos, 2);
-                    uint8_t k_type = data[pos + 2];
-                    uint8_t num_frames = data[pos + 3];
-                    pos += 4;
-                    
-                    AnimationTrack track;
-                    track.bone_id = bone_id;
-                    track.bone_name = "bone_" + std::to_string(bone_id);
-                    
-                    for (uint8_t f = 0; f < num_frames; f++) {
-                        AnimationKeyframe kf = {0};
-                        int16_t time_ticks; std::memcpy(&time_ticks, data + pos, 2);
-                        kf.time = time_ticks / 60.0f; // Guessing 60 ticks per second? Or just frame index
-                        pos += 3; // time (2) + pad (1)
-                        
-                        int16_t qx, qy, qz, qw;
-                        std::memcpy(&qx, data + pos, 2); pos += 2;
-                        std::memcpy(&qy, data + pos, 2); pos += 2;
-                        std::memcpy(&qz, data + pos, 2); pos += 2;
-                        std::memcpy(&qw, data + pos, 2); pos += 2;
-                        
-                        kf.qx = qx / 4096.0f;
-                        kf.qy = qy / 4096.0f;
-                        kf.qz = qz / 4096.0f;
-                        kf.qw = qw / 4096.0f;
-                        
-                        if (k_type == 3) {
-                            int16_t px, py, pz;
-                            std::memcpy(&px, data + pos, 2); pos += 2;
-                            std::memcpy(&py, data + pos, 2); pos += 2;
-                            std::memcpy(&pz, data + pos, 2); pos += 2;
-                            kf.tx = px / 1024.0f;
-                            kf.ty = py / 1024.0f;
-                            kf.tz = pz / 1024.0f;
-                        } else {
-                            kf.tx = kf.ty = kf.tz = 0.0f;
-                        }
-                        track.keyframes.push_back(kf);
-                    }
-                    current_anim.tracks.push_back(track);
-                }
-            }
-            
-            if (!current_anim.name.empty()) {
-                anims[current_anim.name] = current_anim;
-                LOGI("Cargada Anim: %s con %d huesos", current_anim.name.c_str(), num_bones);
-            }
-            pos = anpk_end;
-        } else {
-            pos += sz;
+    void seek(size_t position) {
+        if (position > size_) {
+            throw std::runtime_error("IFP seek out of range");
+        }
+
+        pos_ = position;
+    }
+
+    void skip(size_t count) {
+        seek(pos_ + count);
+    }
+
+    void need(size_t count) const {
+        if (count > size_ - pos_) {
+            throw std::runtime_error(
+                "Unexpected end of IFP at offset " +
+                std::to_string(pos_)
+            );
         }
     }
-    return anims;
+
+    uint8_t u8() {
+        need(1);
+        return data_[pos_++];
+    }
+
+    uint16_t u16() {
+        need(2);
+
+        uint16_t value =
+            static_cast<uint16_t>(data_[pos_]) |
+            (static_cast<uint16_t>(data_[pos_ + 1]) << 8);
+
+        pos_ += 2;
+        return value;
+    }
+
+    int16_t i16() {
+        return static_cast<int16_t>(u16());
+    }
+
+    uint32_t u32() {
+        need(4);
+
+        uint32_t value =
+            static_cast<uint32_t>(data_[pos_]) |
+            (static_cast<uint32_t>(data_[pos_ + 1]) << 8) |
+            (static_cast<uint32_t>(data_[pos_ + 2]) << 16) |
+            (static_cast<uint32_t>(data_[pos_ + 3]) << 24);
+
+        pos_ += 4;
+        return value;
+    }
+
+    float f32() {
+        uint32_t value = u32();
+
+        float result;
+        std::memcpy(&result, &value, sizeof(float));
+
+        return result;
+    }
+
+    std::string cc() {
+        need(4);
+
+        std::string result(
+            reinterpret_cast<const char*>(&data_[pos_]),
+            4
+        );
+
+        pos_ += 4;
+        return result;
+    }
+
+    std::string str(uint32_t length) {
+        need(length);
+
+        std::string result(
+            reinterpret_cast<const char*>(&data_[pos_]),
+            length
+        );
+
+        pos_ += length;
+
+        const size_t nullPos = result.find('\0');
+
+        if (nullPos != std::string::npos) {
+            result.resize(nullPos);
+        }
+
+        return result;
+    }
+
+    void expect(const char* expected) {
+        const std::string actual = cc();
+
+        if (actual != expected) {
+            throw std::runtime_error(
+                "Expected '" +
+                std::string(expected) +
+                "', got '" +
+                actual +
+                "' at offset " +
+                std::to_string(pos_ - 4)
+            );
+        }
+    }
+
+private:
+    const uint8_t* data_;
+    size_t size_;
+    size_t pos_;
+};
+
+
+/*
+ * ============================================================
+ * Manhunt IFP decoding
+ * ============================================================
+ *
+ * Quaternion:
+ *
+ *     int16 / 4096.0
+ *
+ * Translation:
+ *
+ *     int16 / 2048.0
+ *
+ * Animation:
+ *
+ *     30 FPS
+ *
+ * Frame types:
+ *
+ *     1 = Quaternion
+ *     2 = Quaternion + Translation
+ *     3 = Translation
+ *
+ * ============================================================
+ */
+
+static float decodeQuat(int16_t value)
+{
+    return static_cast<float>(value) / 4096.0f;
+}
+
+static float decodeTranslation(int16_t value)
+{
+    return static_cast<float>(value) / 2048.0f;
+}
+
+static float decodeTime(uint16_t value)
+{
+    return static_cast<float>(value) / 2048.0f;
+}
+
+
+static void readQuaternion(
+    Reader2& reader,
+    float& x,
+    float& y,
+    float& z,
+    float& w)
+{
+    x = decodeQuat(reader.i16());
+    y = decodeQuat(reader.i16());
+    z = decodeQuat(reader.i16());
+    w = decodeQuat(reader.i16());
+}
+
+
+static void readTranslation(
+    Reader2& reader,
+    float& x,
+    float& y,
+    float& z)
+{
+    x = decodeTranslation(reader.i16());
+    y = decodeTranslation(reader.i16());
+    z = decodeTranslation(reader.i16());
+}
+
+
+/*
+ * ============================================================
+ * Read one SEQU / SEQT
+ * ============================================================
+ */
+
+static AnimationTrack readTrack(Reader2& reader)
+{
+    const std::string tag = reader.cc();
+
+    if (tag != "SEQU" && tag != "SEQT") {
+        throw std::runtime_error(
+            "Invalid sequence tag: " + tag
+        );
+    }
+
+    AnimationTrack track;
+
+    /*
+     * Bone ID
+     */
+    track.bone_id = reader.u16();
+
+    /*
+     * Frame type
+     */
+    const uint8_t frameType = reader.u8();
+
+    /*
+     * Number of frames
+     */
+    const uint16_t frameCount = reader.u16();
+
+    if (frameType < 1 || frameType > 3) {
+        throw std::runtime_error(
+            "Invalid frame type: " +
+            std::to_string(frameType)
+        );
+    }
+
+    /*
+     * StartTime
+     */
+    const uint16_t startTime = reader.u16();
+
+    /*
+     * FrameType 3 has an initial quaternion.
+     */
+    float initialQx = 0.0f;
+    float initialQy = 0.0f;
+    float initialQz = 0.0f;
+    float initialQw = 1.0f;
+
+    if (frameType == 3) {
+
+        initialQx = decodeQuat(reader.i16());
+        initialQy = decodeQuat(reader.i16());
+        initialQz = decodeQuat(reader.i16());
+        initialQw = decodeQuat(reader.i16());
+
+    } else {
+
+        /*
+         * For sparse tracks, StartTime == 0 means
+         * those two bytes are actually the first
+         * time delta.
+         */
+        if (startTime == 0) {
+            reader.seek(reader.pos() - 2);
+        }
+    }
+
+    track.keyframes.reserve(frameCount);
+
+    float currentTime = 0.0f;
+
+    for (uint16_t frame = 0; frame < frameCount; ++frame) {
+
+        /*
+         * ----------------------------------------------------
+         * Continuous animation
+         * ----------------------------------------------------
+         *
+         * Frame index:
+         *
+         * StartTime / 2048 * 30 - 1 + frame
+         *
+         * Therefore:
+         *
+         * time =
+         * StartTime / 2048
+         * - 1/30
+         * + frame/30
+         */
+        if (startTime != 0) {
+
+            currentTime =
+                static_cast<float>(startTime) / 2048.0f
+                - (1.0f / 30.0f)
+                + static_cast<float>(frame) / 30.0f;
+
+        } else {
+
+            /*
+             * ------------------------------------------------
+             * Sparse animation
+             * ------------------------------------------------
+             */
+
+            if (!(frameType == 3 && frame == 0)) {
+
+                const uint16_t delta = reader.u16();
+
+                currentTime +=
+                    static_cast<float>(delta) / 2048.0f;
+            }
+        }
+
+        AnimationKeyframe keyframe{};
+
+        keyframe.time = currentTime;
+
+        /*
+         * ----------------------------------------------------
+         * Rotation
+         * ----------------------------------------------------
+         */
+
+        if (frameType == 1 || frameType == 2) {
+
+            readQuaternion(
+                reader,
+                keyframe.qx,
+                keyframe.qy,
+                keyframe.qz,
+                keyframe.qw
+            );
+
+        } else {
+
+            /*
+             * FrameType 3 does not have a quaternion
+             * for every frame.
+             *
+             * Use the initial orientation.
+             */
+            keyframe.qx = initialQx;
+            keyframe.qy = initialQy;
+            keyframe.qz = initialQz;
+            keyframe.qw = initialQw;
+        }
+
+        /*
+         * ----------------------------------------------------
+         * Translation
+         * ----------------------------------------------------
+         */
+
+        if (frameType == 2 || frameType == 3) {
+
+            readTranslation(
+                reader,
+                keyframe.tx,
+                keyframe.ty,
+                keyframe.tz
+            );
+
+        } else {
+
+            keyframe.tx = 0.0f;
+            keyframe.ty = 0.0f;
+            keyframe.tz = 0.0f;
+        }
+
+        track.keyframes.push_back(keyframe);
+    }
+
+    /*
+     * SEQT has an additional float.
+     *
+     * Normal Manhunt 1 animations use SEQU.
+     */
+    if (tag == "SEQT") {
+        reader.f32();
+    }
+
+    return track;
+}
+
+
+/*
+ * ============================================================
+ * Load complete IFP
+ * ============================================================
+ */
+
+std::map<std::string, Animation> load_ifp(
+    const uint8_t* data,
+    size_t size)
+{
+    std::map<std::string, Animation> animations;
+
+    if (data == nullptr || size < 12) {
+        LOGE("IFP invalido o demasiado pequeno");
+        return animations;
+    }
+
+    try {
+
+        Reader2 reader(data, size);
+
+        /*
+         * ----------------------------------------------------
+         * ANCT
+         * ----------------------------------------------------
+         */
+
+        reader.expect("ANCT");
+
+        const uint32_t blockCount = reader.u32();
+
+        LOGI(
+            "IFP: %u bloques encontrados",
+            blockCount
+        );
+
+        /*
+         * ----------------------------------------------------
+         * Blocks
+         * ----------------------------------------------------
+         */
+
+        for (uint32_t blockIndex = 0;
+             blockIndex < blockCount;
+             ++blockIndex)
+        {
+            reader.expect("BLOC");
+
+            const uint32_t blockNameLength =
+                reader.u32();
+
+            const std::string blockName =
+                reader.str(blockNameLength);
+
+            LOGI(
+                "Bloque [%u]: %s",
+                blockIndex,
+                blockName.c_str()
+            );
+
+            /*
+             * ------------------------------------------------
+             * ANPK
+             * ------------------------------------------------
+             */
+
+            reader.expect("ANPK");
+
+            const uint32_t animationCount =
+                reader.u32();
+
+            LOGI(
+                "Bloque %s: %u animaciones",
+                blockName.c_str(),
+                animationCount
+            );
+
+            /*
+             * ------------------------------------------------
+             * Animations
+             * ------------------------------------------------
+             */
+
+            for (uint32_t animationIndex = 0;
+                 animationIndex < animationCount;
+                 ++animationIndex)
+            {
+                reader.expect("NAME");
+
+                const uint32_t nameLength =
+                    reader.u32();
+
+                Animation animation;
+
+                animation.name =
+                    reader.str(nameLength);
+
+                /*
+                 * Number of bones/tracks
+                 */
+                const uint32_t boneCount =
+                    reader.u32();
+
+                /*
+                 * Chunk size.
+                 *
+                 * Currently not needed because
+                 * tracks are parsed sequentially.
+                 */
+                const uint32_t chunkSize =
+                    reader.u32();
+
+                (void)chunkSize;
+
+                /*
+                 * FrameTimesCount
+                 */
+                const float frameTimesCount =
+                    reader.f32();
+
+                animation.duration =
+                    frameTimesCount;
+
+                animation.tracks.reserve(
+                    boneCount
+                );
+
+                /*
+                 * ------------------------------------------------
+                 * Tracks
+                 * ------------------------------------------------
+                 */
+
+                for (uint32_t trackIndex = 0;
+                     trackIndex < boneCount;
+                     ++trackIndex)
+                {
+                    AnimationTrack track =
+                        readTrack(reader);
+
+                    animation.tracks.push_back(
+                        std::move(track)
+                    );
+                }
+
+                /*
+                 * ------------------------------------------------
+                 * Debug information
+                 * ------------------------------------------------
+                 */
+
+                if (
+                    animation.name == "1st_Person_1Handed_T" ||
+                    animation.name == "Stand_Idle"
+                ) {
+
+                    LOGI(
+                        "================================"
+                    );
+
+                    LOGI(
+                        "ANIM: %s",
+                        animation.name.c_str()
+                    );
+
+                    LOGI(
+                        "Duration: %.4f",
+                        animation.duration
+                    );
+
+                    LOGI(
+                        "Tracks: %zu",
+                        animation.tracks.size()
+                    );
+
+                    for (const auto& track :
+                         animation.tracks)
+                    {
+                        LOGI(
+                            "Bone=%u Keys=%zu",
+                            track.bone_id,
+                            track.keyframes.size()
+                        );
+
+                        if (!track.keyframes.empty())
+                        {
+                            const auto& key =
+                                track.keyframes.front();
+
+                            LOGI(
+                                "  Frame0 "
+                                "time=%.4f "
+                                "Q=(%.4f %.4f %.4f %.4f) "
+                                "P=(%.4f %.4f %.4f)",
+                                key.time,
+
+                                key.qx,
+                                key.qy,
+                                key.qz,
+                                key.qw,
+
+                                key.tx,
+                                key.ty,
+                                key.tz
+                            );
+                        }
+                    }
+
+                    LOGI(
+                        "================================"
+                    );
+                }
+
+                /*
+                 * ------------------------------------------------
+                 * Particle / effect section
+                 * ------------------------------------------------
+                 */
+
+                const uint32_t headerSize =
+                    reader.u32();
+
+                if (headerSize != 0x10) {
+
+                    throw std::runtime_error(
+                        "Invalid particle section header "
+                        "in animation " +
+                        animation.name
+                    );
+                }
+
+                /*
+                 * Unknown
+                 */
+                reader.f32();
+
+                /*
+                 * Entry size
+                 */
+                const uint32_t entrySize =
+                    reader.u32();
+
+                /*
+                 * Number of entries
+                 */
+                const uint32_t entryCount =
+                    reader.u32();
+
+                if (entryCount > 0) {
+
+                    const uint64_t totalSize =
+                        static_cast<uint64_t>(entrySize) *
+                        static_cast<uint64_t>(entryCount);
+
+                    if (totalSize >
+                        static_cast<uint64_t>(size - reader.pos()))
+                    {
+                        throw std::runtime_error(
+                            "Particle section exceeds IFP size"
+                        );
+                    }
+
+                    reader.skip(
+                        static_cast<size_t>(totalSize)
+                    );
+                }
+
+                /*
+                 * ------------------------------------------------
+                 * Store animation
+                 * ------------------------------------------------
+                 */
+
+                animations[animation.name] =
+                    std::move(animation);
+            }
+        }
+
+        /*
+         * ----------------------------------------------------
+         * Finished
+         * ----------------------------------------------------
+         */
+
+        LOGI(
+            "IFP cargado correctamente: %zu animaciones",
+            animations.size()
+        );
+
+        LOGI(
+            "Final offset: %zu / %zu",
+            reader.pos(),
+            size
+        );
+
+    }
+    catch (const std::exception& e) {
+
+        LOGE(
+            "ERROR parseando IFP: %s",
+            e.what()
+        );
+    }
+
+    return animations;
 }

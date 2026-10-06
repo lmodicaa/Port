@@ -4,24 +4,38 @@
 #include <vector>
 #include <map>
 #include <cstdint>
+#include <cstddef>
 
 struct AnimationKeyframe {
-    float time;
-    float qx, qy, qz, qw; // Quaternion
-    float tx, ty, tz;     // Translation (only if root or translated)
+    float time = 0.0f;
+
+    float qx = 0.0f;
+    float qy = 0.0f;
+    float qz = 0.0f;
+    float qw = 1.0f;
+
+    float tx = 0.0f;
+    float ty = 0.0f;
+    float tz = 0.0f;
 };
 
 struct AnimationTrack {
+    int bone_id = -1;
+
     std::string bone_name;
-    int bone_id; // -1 if not mapped yet
+
     std::vector<AnimationKeyframe> keyframes;
 };
 
 struct Animation {
     std::string name;
-    float duration;
+
+    float duration = 0.0f;
+
     std::vector<AnimationTrack> tracks;
 };
 
-// Carga todas las animaciones de un archivo IFP
-std::map<std::string, Animation> load_ifp(const uint8_t* data, size_t size);
+std::map<std::string, Animation> load_ifp(
+        const uint8_t* data,
+        size_t size
+);

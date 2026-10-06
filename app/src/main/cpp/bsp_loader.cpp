@@ -56,11 +56,29 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
     // El primer hijo de RW_WORLD es RW_STRUCT
     ChunkHeader ws_hdr = r.read_chunk();
     if (ws_hdr.type != 0x0001) return model;
-    
-    // Leer flags (offset 36 en el struct, índice 9)
-    r.skip(36);
-    uint32_t world_format = r.read<uint32_t>();
-    r.skip(ws_hdr.size - 40); // Saltar el resto del struct (bbox, etc)
+
+    // ── Struct del mundo (84 bytes). Layout RW 3.6 (ver parse_bsp.py):
+    //   +0  rootIsWorldSector (int)
+    //   +4  invWorldOrigin[3] (float)
+    //   +16 ambientColor[4]   (float)  <- iluminación ambiente del nivel
+    //   +32 dirAmbientColor[4](float)  <- luz direccional (color)
+    //   +48 lightDirection[3] (float)  <- dirección de la luz
+    //   +60 numTriangles ... +80 format
+    {
+        size_t ws_start = r.pos;
+        r.skip(4);   // rootIsWorldSector
+        r.skip(12);  // invWorldOrigin[3]
+        for (int i = 0; i < 4; i++) model.world.ambient[i]     = r.read<float>();
+        for (int i = 0; i < 4; i++) model.world.dir_ambient[i] = r.read<float>();
+        for (int i = 0; i < 3; i++) model.world.light_dir[i]   = r.read<float>();
+        model.world.valid = true;
+        LOGI("World ambient=(%.3f %.3f %.3f) dirAmbient=(%.3f %.3f %.3f) lightDir=(%.3f %.3f %.3f)",
+             model.world.ambient[0], model.world.ambient[1], model.world.ambient[2],
+             model.world.dir_ambient[0], model.world.dir_ambient[1], model.world.dir_ambient[2],
+             model.world.light_dir[0], model.world.light_dir[1], model.world.light_dir[2]);
+        // Saltar el resto del struct hasta su final
+        r.pos = ws_start + ws_hdr.size;
+    }
 
     // El segundo hijo de RW_WORLD es RW_MATERIAL_LIST
     ChunkHeader ml_hdr = r.read_chunk();

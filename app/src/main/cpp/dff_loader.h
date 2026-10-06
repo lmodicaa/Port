@@ -26,11 +26,33 @@ struct DFFBone {
     float pos_z = 0.f;
 };
 
+// Material de RenderWare: color RGBA + coeficientes de iluminación.
+// Estos valores vienen directamente del struct del material (.bsp/.dff) —
+// son los que usa el motor original, no constantes inventadas.
+struct MaterialData {
+    float color[4]      = {1.f, 1.f, 1.f, 1.f}; // diffuse/color RGBA (0..1)
+    float ambient       = 0.f;                  // coeficiente ambiente
+    float diffuse       = 1.f;                  // coeficiente difuso
+    float specular      = 0.f;                  // coeficiente especular
+    std::string texture;                        // nombre de textura (vacío = sin textura)
+};
+
+// Iluminación del mundo embebida en el RW_WORLD (.bsp).
+// Manhunt usa estos valores para iluminar toda la escena.
+struct WorldLighting {
+    float ambient[4]     = {0.5f, 0.5f, 0.5f, 1.f};   // ambientColor del mundo
+    float dir_ambient[4] = {0.5f, 0.5f, 0.5f, 1.f};   // directionalAmbientColor
+    float light_dir[3]   = {0.f, -1.f, 0.f};          // lightDirection
+    bool  valid          = false;
+};
+
 // Geometría completa extraída del DFF
 struct DFFModel {
     std::vector<DFFVertex> vertices;
     std::vector<std::vector<uint16_t>> indices_by_mat;
     std::vector<std::string> material_textures;
+    std::vector<MaterialData> materials;      // datos completos de material
+    WorldLighting world;                      // sólo poblado por bsp_load()
     std::vector<float> inverse_bind_matrices; // float[16] per bone
     std::map<uint32_t, uint32_t> bone_id_to_index; // HAnim map
     std::vector<DFFBone> bones; // FrameList hierarchy

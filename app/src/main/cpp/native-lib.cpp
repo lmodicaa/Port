@@ -250,7 +250,7 @@ void main() {
     vec4 local_pos = vec4(a_pos, 1.0);
     
     if (u_skinned == 1) {
-        mat4 bone_transform = 
+        mat4 bone_transform =
             u_bone_matrices[clamp(int(a_bone_idx.x), 0, 95)] * a_bone_weight.x +
             u_bone_matrices[clamp(int(a_bone_idx.y), 0, 95)] * a_bone_weight.y +
             u_bone_matrices[clamp(int(a_bone_idx.z), 0, 95)] * a_bone_weight.z +
@@ -506,12 +506,10 @@ static void setup_model() {
             upload_dff_to_gpu(cash_model, rd);
             g_model_render["cash"] = rd;
             
-            float min_cash_x = 1e9f;
-            for (const auto& v : cash_model.vertices) {
-                if (v.x < min_cash_x) min_cash_x = v.x;
-            }
-            g_cash_y_offset = std::abs(min_cash_x);
-            LOGI("Cash model loaded. Y-Offset para los pies: %.3f", g_cash_y_offset);
+            // Asumimos que el origen del modelo ya está en los pies (Y=0)
+            // Si calculamos el mínimo Y a veces toma vértices invisibles o huesos de armas y lo hace flotar.
+            g_cash_y_offset = 0.0f;
+            LOGI("Cash model loaded. Y-Offset manual: %.3f", g_cash_y_offset);
         }
     }
 
@@ -760,200 +758,431 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         }
     }
     
-    // ── Skeletal Animation Update ─────────────────────────────────────────
-    // Actualizar tiempo de animación
+    // ── Skeletal Animation Update ─────────────────────────────────────────────
     g_anim_time += dt;
-    
-    // Draw Cash con Skeletal Animation
     auto it_cash = g_model_render.find("cash");
     if (it_cash != g_model_render.end()) {
-        // Debug: verificar si tenemos huesos
-        static bool logged = false;
-        if (!logged) {
-            LOGI("Cash render: bones=%zu, groups=%zu, inv_bind_mats=%zu", 
-                 g_cash_model.bones.size(), it_cash->second.groups.size(), 
-                 g_cash_model.inverse_bind_matrices.size() / 16);
-            if (!g_cash_model.inverse_bind_matrices.empty()) {
-                LOGI("First inv_bind matrix [0]: [%.3f,%.3f,%.3f,%.3f / %.3f,%.3f,%.3f,%.3f / %.3f,%.3f,%.3f,%.3f / %.3f,%.3f,%.3f,%.3f]",
-                     g_cash_model.inverse_bind_matrices[0], g_cash_model.inverse_bind_matrices[1],
-                     g_cash_model.inverse_bind_matrices[2], g_cash_model.inverse_bind_matrices[3],
-                     g_cash_model.inverse_bind_matrices[4], g_cash_model.inverse_bind_matrices[5],
-                     g_cash_model.inverse_bind_matrices[6], g_cash_model.inverse_bind_matrices[7],
-                     g_cash_model.inverse_bind_matrices[8], g_cash_model.inverse_bind_matrices[9],
-                     g_cash_model.inverse_bind_matrices[10], g_cash_model.inverse_bind_matrices[11],
-                     g_cash_model.inverse_bind_matrices[12], g_cash_model.inverse_bind_matrices[13],
-                     g_cash_model.inverse_bind_matrices[14], g_cash_model.inverse_bind_matrices[15]);
-            }
-            logged = true;
-        }
-        if (g_cash_model.bones.empty()) {
-            // Si no hay huesos, renderizar sin animación (solo identidad)
-            Mat4 bones[96];
-            for(int i=0; i<96; i++) bones[i] = mat4_identity();
-            
-            Vec3 center_pos = vec3_add(g_player_pos, {0.0f, g_cash_y_offset, 0.0f});
-            Mat4 cash_model_m = mat4_from_pos_yaw(center_pos, g_player_yaw);
-            Mat4 cash_mvp = mat4_mul(vp, cash_model_m);
-            glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, cash_mvp.m);
-            glUniformMatrix4fv(loc_model, 1, GL_FALSE, cash_model_m.m);
-            glUniform1i(loc_skinned, 1);
-            glUniformMatrix4fv(loc_bones, 96, GL_FALSE, bones[0].m);
-
-            glBindVertexArray(it_cash->second.vao);
-            for (const auto& group : it_cash->second.groups) {
-                if (group.texture_id) {
-                    glBindTexture(GL_TEXTURE_2D, group.texture_id);
-                }
-                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, group.ebo);
-                glDrawElements(GL_TRIANGLES, group.num_indices, GL_UNSIGNED_SHORT, nullptr);
-            }
-        } else {
-        Vec3 center_pos = vec3_add(g_player_pos, {0.0f, g_cash_y_offset, 0.0f});
-        Mat4 cash_model_m = mat4_from_pos_yaw(center_pos, g_player_yaw);
-        Mat4 cash_mvp = mat4_mul(vp, cash_model_m);
-        glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, cash_mvp.m);
-        glUniformMatrix4fv(loc_model, 1, GL_FALSE, cash_model_m.m);
-        glUniform1i(loc_skinned, 1);
-        
-        // ── Bucle de Actualización del Esqueleto ───────────────────────────
         Mat4 global_bones[96];
         Mat4 skin_matrices[96];
-        
-        // Inicializar con identidad
-        for(int i=0; i<96; i++) {
+        for (int i = 0; i < 96; ++i) {
             global_bones[i] = mat4_identity();
             skin_matrices[i] = mat4_identity();
         }
-        
-        // Obtener animación (buscar "1st_Person_1Handed_T" o la primera disponible)
+        /*
+         * --------------------------------------------------------
+         * Seleccionar animación
+         * --------------------------------------------------------
+         */
         const Animation* anim = nullptr;
-        auto anim_it = g_anims.find("1st_Person_1Handed_T");
-        if (anim_it != g_anims.end()) {
-            anim = &anim_it->second;
-        } else if (!g_anims.empty()) {
+        float speed = sqrtf(
+            g_move_fwd * g_move_fwd +
+            g_move_right * g_move_right
+        );
+        auto find_anim = [&](const char* wanted) -> const Animation* {
+            std::string query = to_lower(wanted);
+            for (const auto& pair : g_anims) {
+                std::string name = to_lower(pair.first);
+                if (name == query) {
+                    return &pair.second;
+                }
+            }
+            return nullptr;
+        };
+        /*
+         * Primero intentamos encontrar las animaciones exactas.
+         */
+        if (speed > 0.6f) {
+            anim = find_anim("Run_Fwd");
+        } else if (speed > 0.05f) {
+            anim = find_anim("Walk_Fwd");
+        } else {
+            anim = find_anim("Stand_Idle");
+        }
+        /*
+         * Si no existen esas animaciones, usamos Stand_Idle.
+         */
+        if (!anim) {
+            anim = find_anim("Stand_Idle");
+        }
+        /*
+         * Último fallback.
+         */
+        if (!anim && !g_anims.empty()) {
             anim = &g_anims.begin()->second;
         }
-        
-        // Procesar cada hueso
-        for (size_t bone_idx = 0; bone_idx < g_cash_model.bones.size() && bone_idx < 96; bone_idx++) {
+        /*
+         * --------------------------------------------------------
+         * Debug de animación
+         * --------------------------------------------------------
+         */
+        static bool logged_animation = false;
+        if (!logged_animation && anim) {
+            LOGI(
+                "ANIM PLAY: %s duration=%.3f tracks=%zu",
+                anim->name.c_str(),
+                anim->duration,
+                anim->tracks.size()
+            );
+            logged_animation = true;
+        }
+        /*
+         * --------------------------------------------------------
+         * Tiempo de animación
+         * --------------------------------------------------------
+         */
+        float animation_time = 0.0f;
+        if (anim && anim->duration > 0.0f) {
+            animation_time = fmodf(
+                g_anim_time,
+                anim->duration
+            );
+            if (animation_time < 0.0f)
+                animation_time += anim->duration;
+        }
+        /*
+         * --------------------------------------------------------
+         * Procesar huesos
+         * --------------------------------------------------------
+         */
+        for (
+            size_t bone_idx = 0;
+            bone_idx < g_cash_model.bones.size() && bone_idx < 96;
+            ++bone_idx
+        ) {
             const DFFBone& bone = g_cash_model.bones[bone_idx];
-            // Posición por defecto (bind pose)
-            float pos[3] = {bone.pos_x, bone.pos_y, bone.pos_z};
-            float quat[4] = {0.0f, 0.0f, 0.0f, 1.0f}; // Identidad
-            bool is_animated = false;
-            
-            // Si hay animación, buscar el track para este hueso
-            if (anim != nullptr && bone.bone_id != 0xFFFFFFFF) {
+            /*
+             * ----------------------------------------------------
+             * Pose base
+             * ----------------------------------------------------
+             */
+            float pos[3] = { bone.pos_x, bone.pos_y, bone.pos_z };
+            float quat[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+            bool animated = false;
+            /*
+             * ----------------------------------------------------
+             * Buscar track usando SOLAMENTE bone_id
+             * ----------------------------------------------------
+             *
+             * No usamos bone_idx como fallback.
+             *
+             * El IFP utiliza IDs como:
+             *
+             * 1000
+             * 1001
+             * 1003
+             * 1045
+             * 1095
+             *
+             * Por lo tanto hay que relacionarlos con el
+             * bone_id real del DFF.
+             */
+            if (
+                anim &&
+                bone.bone_id != 0xFFFFFFFF
+            ) {
                 for (const auto& track : anim->tracks) {
-                    if (track.bone_id == (int)bone.bone_id && !track.keyframes.empty()) {
-                        is_animated = true;
-                        // Calcular tiempo cíclico
-                        float anim_duration = anim->duration > 0.0f ? anim->duration : 1.0f;
-                        float loop_time = fmodf(g_anim_time, anim_duration);
-                        
-                        // Buscar keyframes para interpolación
-                        const AnimationKeyframe* kf0 = &track.keyframes[0];
-                        const AnimationKeyframe* kf1 = &track.keyframes[0];
-                        
-                        for (size_t k = 0; k < track.keyframes.size(); k++) {
-                            if (track.keyframes[k].time <= loop_time) {
-                                kf0 = &track.keyframes[k];
-                                kf1 = (k + 1 < track.keyframes.size()) ? &track.keyframes[k + 1] : &track.keyframes[0];
-                            } else {
+                    if (
+                        track.bone_id != static_cast<int>(bone.bone_id)
+                    ) {
+                        continue;
+                    }
+                    if (track.keyframes.empty()) {
+                        continue;
+                    }
+                    animated = true;
+                    /*
+                     * ------------------------------------------------
+                     * Buscar los dos keyframes
+                     * ------------------------------------------------
+                     */
+                    const AnimationKeyframe* k0 = &track.keyframes.front();
+                    const AnimationKeyframe* k1 = &track.keyframes.front();
+                    /*
+                     * Antes del primer frame.
+                     */
+                    if (
+                        animation_time <= track.keyframes.front().time
+                    ) {
+                        k0 = &track.keyframes.front();
+                        k1 = &track.keyframes.front();
+                    } else {
+                        bool found = false;
+                        for (
+                            size_t k = 0;
+                            k + 1 < track.keyframes.size();
+                            ++k
+                        ) {
+                            const auto& a = track.keyframes[k];
+                            const auto& b = track.keyframes[k + 1];
+                            if (
+                                animation_time >= a.time &&
+                                animation_time <= b.time
+                            ) {
+                                k0 = &a;
+                                k1 = &b;
+                                found = true;
                                 break;
                             }
                         }
-                        
-                        // Interpolación lineal
-                        float t = 0.0f;
-                        if (kf1->time > kf0->time) {
-                            t = (loop_time - kf0->time) / (kf1->time - kf0->time);
-                            t = std::max(0.0f, std::min(1.0f, t));
+                        /*
+                         * Si estamos después del último keyframe,
+                         * mantenemos el último.
+                         */
+                        if (!found) {
+                            k0 = &track.keyframes.back();
+                            k1 = &track.keyframes.back();
                         }
-                        
-                        // Asegurar el camino más corto para el quaternion
-                        float qx1 = kf1->qx, qy1 = kf1->qy, qz1 = kf1->qz, qw1 = kf1->qw;
-                        float dot = kf0->qx*qx1 + kf0->qy*qy1 + kf0->qz*qz1 + kf0->qw*qw1;
-                        if (dot < 0.0f) {
-                            qx1 = -qx1; qy1 = -qy1; qz1 = -qz1; qw1 = -qw1;
-                        }
-                        
-                        // Interpolar quaternion (LERP)
-                        quat[0] = kf0->qx + t * (qx1 - kf0->qx);
-                        quat[1] = kf0->qy + t * (qy1 - kf0->qy);
-                        quat[2] = kf0->qz + t * (qz1 - kf0->qz);
-                        quat[3] = kf0->qw + t * (qw1 - kf0->qw);
-                        
-                        // Normalizar quaternion
-                        float qlen = sqrtf(quat[0]*quat[0] + quat[1]*quat[1] + quat[2]*quat[2] + quat[3]*quat[3]);
-                        if (qlen > 1e-6f) {
-                            quat[0] /= qlen; quat[1] /= qlen; quat[2] /= qlen; quat[3] /= qlen;
-                        } else {
-                            quat[0] = 0.0f; quat[1] = 0.0f; quat[2] = 0.0f; quat[3] = 1.0f;
-                        }
-                        
-                        // Interpolar posición (si el track tiene traslación)
-                        // Solo actualizar posición si los valores de traslación no son cero
-                        float tx0 = kf0->tx, ty0 = kf0->ty, tz0 = kf0->tz;
-                        float tx1 = kf1->tx, ty1 = kf1->ty, tz1 = kf1->tz;
-                        
-                        if (fabsf(tx0) > 1e-6f || fabsf(ty0) > 1e-6f || fabsf(tz0) > 1e-6f ||
-                            fabsf(tx1) > 1e-6f || fabsf(ty1) > 1e-6f || fabsf(tz1) > 1e-6f) {
-                            pos[0] = tx0 + t * (tx1 - tx0);
-                            pos[1] = ty0 + t * (ty1 - ty0);
-                            pos[2] = tz0 + t * (tz1 - tz0);
-                        }
-                        
-                        break; // Encontramos el track, salir del loop
                     }
+                    /*
+                     * ------------------------------------------------
+                     * Interpolación
+                     * ------------------------------------------------
+                     */
+                    float t = 0.0f;
+                    if (
+                        k1 != k0 &&
+                        k1->time > k0->time
+                    ) {
+                        t = (animation_time - k0->time) / (k1->time - k0->time);
+                        t = std::max(
+                            0.0f,
+                            std::min(1.0f, t)
+                        );
+                    }
+                    /*
+                     * ------------------------------------------------
+                     * Quaternion
+                     * ------------------------------------------------
+                     */
+                    float qx1 = k1->qx;
+                    float qy1 = k1->qy;
+                    float qz1 = k1->qz;
+                    float qw1 = k1->qw;
+                    /*
+                     * Quaternion shortest path.
+                     */
+                    float dot = k0->qx * qx1 + k0->qy * qy1 + k0->qz * qz1 + k0->qw * qw1;
+                    if (dot < 0.0f) {
+                        qx1 = -qx1;
+                        qy1 = -qy1;
+                        qz1 = -qz1;
+                        qw1 = -qw1;
+                    }
+                    quat[0] = k0->qx + t * (qx1 - k0->qx);
+                    quat[1] = k0->qy + t * (qy1 - k0->qy);
+                    quat[2] = k0->qz + t * (qz1 - k0->qz);
+                    quat[3] = k0->qw + t * (qw1 - k0->qw);
+                    /*
+                     * Normalizar.
+                     */
+                    float qlen = sqrtf(
+                        quat[0] * quat[0] +
+                        quat[1] * quat[1] +
+                        quat[2] * quat[2] +
+                        quat[3] * quat[3]
+                    );
+                    if (qlen > 0.000001f) {
+                        quat[0] /= qlen;
+                        quat[1] /= qlen;
+                        quat[2] /= qlen;
+                        quat[3] /= qlen;
+                    }
+                    /*
+                     * ------------------------------------------------
+                     * Translation
+                     * ------------------------------------------------
+                     */
+                    pos[0] = k0->tx + t * (k1->tx - k0->tx);
+                    pos[1] = k0->ty + t * (k1->ty - k0->ty);
+                    pos[2] = k0->tz + t * (k1->tz - k0->tz);
+                    /*
+                     * Debug solamente para algunos huesos.
+                     */
+                    static int debug_anim_counter = 0;
+                    if (
+                        debug_anim_counter++ % 120 == 0 &&
+                        (
+                            bone.bone_id == 1000 ||
+                            bone.bone_id == 1045 ||
+                            bone.bone_id == 1095
+                        )
+                    ) {
+                        LOGI(
+                            "ANIM APPLY: anim=%s bone=%u "
+                            "time=%.3f "
+                            "Q=(%.3f %.3f %.3f %.3f) "
+                            "P=(%.3f %.3f %.3f)",
+                            anim->name.c_str(),
+                            bone.bone_id,
+                            animation_time,
+                            quat[0], quat[1], quat[2], quat[3],
+                            pos[0], pos[1], pos[2]
+                        );
+                    }
+                    break;
                 }
             }
-            
-            // Construir matriz local del hueso
-            Mat4 local_mat = mat4_identity();
-            if (is_animated) {
-                local_mat = mat4_from_pos_quat(pos, quat);
-            } else {
-                local_mat.m[0] = bone.rot_mat[0]; local_mat.m[1] = bone.rot_mat[1]; local_mat.m[2] = bone.rot_mat[2];
-                local_mat.m[4] = bone.rot_mat[3]; local_mat.m[5] = bone.rot_mat[4]; local_mat.m[6] = bone.rot_mat[5];
-                local_mat.m[8] = bone.rot_mat[6]; local_mat.m[9] = bone.rot_mat[7]; local_mat.m[10]= bone.rot_mat[8];
-                local_mat.m[12] = pos[0];         local_mat.m[13] = pos[1];         local_mat.m[14] = pos[2];
+            /*
+             * --------------------------------------------------------
+             * Matriz bind
+             * --------------------------------------------------------
+             */
+            Mat4 bind_mat = mat4_identity();
+            bind_mat.m[0] = bone.rot_mat[0];
+            bind_mat.m[1] = bone.rot_mat[1];
+            bind_mat.m[2] = bone.rot_mat[2];
+            bind_mat.m[4] = bone.rot_mat[3];
+            bind_mat.m[5] = bone.rot_mat[4];
+            bind_mat.m[6] = bone.rot_mat[5];
+            bind_mat.m[8] = bone.rot_mat[6];
+            bind_mat.m[9] = bone.rot_mat[7];
+            bind_mat.m[10] = bone.rot_mat[8];
+            bind_mat.m[12] = bone.pos_x;
+            bind_mat.m[13] = bone.pos_y;
+            bind_mat.m[14] = bone.pos_z;
+            /*
+             * --------------------------------------------------------
+             * Matriz local
+             * --------------------------------------------------------
+             */
+            Mat4 local_mat = bind_mat;
+            if (animated) {
+                /*
+                 * La animación proporciona la rotación.
+                 * La posición del hueso se conserva desde el DFF,
+                 * excepto cuando el track proporciona traslación.
+                 */
+                float zero[3] = { 0.0f, 0.0f, 0.0f };
+                Mat4 anim_mat = mat4_from_pos_quat(
+                    zero,
+                    quat
+                );
+                local_mat = anim_mat;
+                /*
+                 * Mantener la posición del hueso
+                 * proveniente del skeleton.
+                 */
+                local_mat.m[12] = bind_mat.m[12];
+                local_mat.m[13] = bind_mat.m[13];
+                local_mat.m[14] = bind_mat.m[14];
+                /*
+                 * Root.
+                 *
+                 * Si es el root, sí usamos la traslación
+                 * proporcionada por la animación.
+                 */
+                if (bone.bone_id == 1000) {
+                    local_mat.m[12] = pos[0];
+                    local_mat.m[13] = pos[1];
+                    local_mat.m[14] = pos[2];
+                }
             }
-            
-            // Multiplicación jerárquica: aplicar transformación del padre
-            if (bone.parent != 0xFFFFFFFF && bone.parent < bone_idx) {
-                global_bones[bone_idx] = mat4_mul(global_bones[bone.parent], local_mat);
+            /*
+             * --------------------------------------------------------
+             * Jerarquía
+             * --------------------------------------------------------
+             */
+            if (
+                bone.parent != 0xFFFFFFFF &&
+                bone.parent < bone_idx
+            ) {
+                global_bones[bone_idx] = mat4_mul(
+                    global_bones[bone.parent],
+                    local_mat
+                );
             } else {
                 global_bones[bone_idx] = local_mat;
             }
-            
-            // Calcular matriz de skinning: skin = global * inverse_bind
-            // (inverse_bind ya viene transpuesta a column-major desde dff_loader).
-            // En bind pose, global * inverse_bind = identidad -> vértice intacto.
-            if (bone.matrix_index != 0xFFFFFFFF && bone.matrix_index < 96 &&
-                (bone.matrix_index * 16 + 15) < g_cash_model.inverse_bind_matrices.size()) {
-                Mat4 inv_bind;
-                for (int j = 0; j < 16; j++) {
-                    inv_bind.m[j] = g_cash_model.inverse_bind_matrices[(size_t)bone.matrix_index * 16 + j];
+            /*
+             * --------------------------------------------------------
+             * Skin matrix
+             * --------------------------------------------------------
+             */
+            if (
+                bone.matrix_index != 0xFFFFFFFF &&
+                bone.matrix_index < 96 &&
+                (
+                    bone.matrix_index * 16 + 15
+                ) < g_cash_model.inverse_bind_matrices.size()
+            ) {
+                Mat4 inverse_bind;
+                for (int j = 0; j < 16; ++j) {
+                    inverse_bind.m[j] = g_cash_model
+                        .inverse_bind_matrices[
+                            static_cast<size_t>(
+                                bone.matrix_index
+                            ) * 16 + j
+                        ];
                 }
-                skin_matrices[bone.matrix_index] = mat4_mul(global_bones[bone_idx], inv_bind);
+                skin_matrices[
+                    bone.matrix_index
+                ] = mat4_mul(
+                    global_bones[bone_idx],
+                    inverse_bind
+                );
             }
         }
-        
-        // Enviar matrices al shader
-        glUniformMatrix4fv(loc_bones, 96, GL_FALSE, skin_matrices[0].m);
-
-        glBindVertexArray(it_cash->second.vao);
+        /*
+         * --------------------------------------------------------
+         * Render
+         * --------------------------------------------------------
+         */
+        Vec3 center_pos = vec3_add(
+            g_player_pos,
+            { 0.0f, g_cash_y_offset, 0.0f }
+        );
+        Mat4 cash_model_m = mat4_from_pos_yaw(
+            center_pos,
+            g_player_yaw
+        );
+        Mat4 cash_mvp = mat4_mul(
+            vp,
+            cash_model_m
+        );
+        glUniformMatrix4fv(
+            loc_mvp,
+            1,
+            GL_FALSE,
+            cash_mvp.m
+        );
+        glUniformMatrix4fv(
+            loc_model,
+            1,
+            GL_FALSE,
+            cash_model_m.m
+        );
+        glUniform1i(
+            loc_skinned,
+            1
+        );
+        glUniformMatrix4fv(
+            loc_bones,
+            96,
+            GL_FALSE,
+            skin_matrices[0].m
+        );
+        glBindVertexArray(
+            it_cash->second.vao
+        );
         for (const auto& group : it_cash->second.groups) {
             if (group.texture_id) {
-                glBindTexture(GL_TEXTURE_2D, group.texture_id);
+                glBindTexture(
+                    GL_TEXTURE_2D,
+                    group.texture_id
+                );
             }
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, group.ebo);
-            glDrawElements(GL_TRIANGLES, group.num_indices, GL_UNSIGNED_SHORT, nullptr);
+            glBindBuffer(
+                GL_ELEMENT_ARRAY_BUFFER,
+                group.ebo
+            );
+            glDrawElements(
+                GL_TRIANGLES,
+                group.num_indices,
+                GL_UNSIGNED_SHORT,
+                nullptr
+            );
         }
-        } // fin del else (cuando hay huesos)
     }
-
     glBindVertexArray(0);
 }
 
