@@ -17,7 +17,7 @@
             android:id="@+id/btn_action"
             android:layout_width="80dp"
             android:layout_height="80dp"
-            android:text="Action"
+            android:text="Anim"
             android:background="#80000000"
             android:textColor="#FFFFFF" />
 
