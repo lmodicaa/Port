@@ -4481,7 +4481,7 @@ static float snap_aim_angle(float angle) {
 }
 
 JNIEXPORT void JNICALL
-Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_x, jfloat stick_y) {
+Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_x, jfloat stick_y, jboolean touch_mode) {
     const double now = aim_time_seconds();
     float dt = 0.016f;
     if (g_aim_clock_started) {
@@ -4506,10 +4506,12 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
     x /= len;
     y /= len;
 
-    const float angle = atan2f(x, -y);
-    const float snapped = snap_aim_angle(angle);
-    x = sinf(snapped);
-    y = -cosf(snapped);
+    if (!touch_mode) {
+        const float angle = atan2f(x, -y);
+        const float snapped = snap_aim_angle(angle);
+        x = sinf(snapped);
+        y = -cosf(snapped);
+    }
 
     const float horizontal_speed = aim_zone_speed(distance, false);
     const float vertical_speed = aim_zone_speed(distance, true);
