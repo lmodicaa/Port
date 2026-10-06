@@ -1139,14 +1139,17 @@ static void parse_entity_type_data(
             } else if (lower_key == "zoom_aim_scale_moving") {
                 parts >> g_player_control.zoom_aim_scale_moving;
             } else if (lower_key == "zoom_levels") {
+                char comma;
                 parts >> g_player_control.zoom_levels[0] >> comma
                       >> g_player_control.zoom_levels[1];
             } else if (lower_key == "zoom_speed") {
                 parts >> g_player_control.zoom_speed;
             } else if (lower_key == "zoom_move_scales") {
+                char comma;
                 parts >> g_player_control.zoom_move_scales[0] >> comma
                       >> g_player_control.zoom_move_scales[1];
             } else if (lower_key == "zoom_max_zones") {
+                char comma;
                 parts >> g_player_control.zoom_max_zones[0] >> comma
                       >> g_player_control.zoom_max_zones[1];
             } else if (lower_key == "move_trans_speed") {
