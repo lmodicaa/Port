@@ -582,17 +582,24 @@ static void dump_turn_track_rotations() {
             const auto& a = track.keyframes.front();
             const auto& b = track.keyframes.back();
 
-            const float ay = 2.0f * atan2f(a.qy, a.qw);
-            const float by = 2.0f * atan2f(b.qy, b.qw);
-            const float delta = by - ay;
+            const float dot =
+                std::fabs(
+                    a.qx*b.qx + a.qy*b.qy +
+                    a.qz*b.qz + a.qw*b.qw
+                );
+            const float clamped_dot = std::max(0.0f, std::min(1.0f, dot));
+            const float angle = 2.0f * acosf(clamped_dot);
 
-            if (std::fabs(delta) > 0.05f) {
+            if (angle > 0.10f) {
                 LOGI(
-                    "TURN TRACK: %s bone=%d name=%s yaw=%.3f->%.3f delta=%.3f deg=%.1f",
+                    "TURN TRACK: %s bone=%d name=%s angle=%.3f deg=%.1f q=[%.3f,%.3f,%.3f,%.3f]->[%.3f,%.3f,%.3f,%.3f]",
                     anim.name.c_str(),
                     track.bone_id,
                     track.bone_name.c_str(),
-                    ay, by, delta, delta * 57.2957795f
+                    angle,
+                    angle * 57.2957795f,
+                    a.qx, a.qy, a.qz, a.qw,
+                    b.qx, b.qy, b.qz, b.qw
                 );
             }
         }
