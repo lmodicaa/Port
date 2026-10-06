@@ -536,6 +536,7 @@ static Mat4 mat4_rotate_z(float angle) {
 }
 static DFFModel g_cash_model;
 static float g_player_yaw = 0.0f;
+static float g_move_blend = 0.0f;
 static float g_anim_time = 0.f;
 static std::string g_last_played_anim;
 static float g_cam_yaw    = 0.0f;
@@ -2602,13 +2603,42 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         vel_xz.x *= inv * input_strength;
         vel_xz.z *= inv * input_strength;
 
-        g_player_yaw = atan2f(
+        const float desired_yaw = atan2f(
             -vel_xz.x,
             -vel_xz.z
         );
+
+        // El personaje no gira instantáneamente con el stick. Aplicamos
+        // una velocidad angular limitada, como el controlador de Manhunt.
+        float yaw_delta = desired_yaw - g_player_yaw;
+        while (yaw_delta > 3.14159265359f) yaw_delta -= 6.28318530718f;
+        while (yaw_delta < -3.14159265359f) yaw_delta += 6.28318530718f;
+
+        const float max_turn =
+            g_player_control.turn_acceleration * dt;
+
+        if (fabsf(yaw_delta) <= max_turn) {
+            g_player_yaw = desired_yaw;
+        } else {
+            g_player_yaw +=
+                (yaw_delta > 0.0f ? max_turn : -max_turn);
+        }
+
+        while (g_player_yaw > 3.14159265359f)
+            g_player_yaw -= 6.28318530718f;
+        while (g_player_yaw < -3.14159265359f)
+            g_player_yaw += 6.28318530718f;
     } else {
         vel_xz = {0.0f, 0.0f, 0.0f};
     }
+
+    // Suavizar la intensidad real del movimiento evita que el personaje
+    // cambie instantáneamente entre idle/walk/run al mover el stick.
+    const float blend_rate = 8.0f;
+    const float blend_alpha =
+        1.0f - expf(-blend_rate * dt);
+    g_move_blend +=
+        (input_strength - g_move_blend) * blend_alpha;
 
     // MOVE_THRESHOLDS del juego define las zonas del stick:
     // por debajo de walk = movimiento lento, entre walk/run = walk,
@@ -2616,12 +2646,12 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     // nuestro control, así que el máximo analógico llega hasta run.
     float movement_multiplier = g_player_control.walk_speed;
 
-    if (input_strength < g_player_control.move_walk_threshold) {
+    if (g_move_blend < g_player_control.move_walk_threshold) {
         movement_multiplier =
             g_player_control.sneak_walk_speed;
-    } else if (input_strength >=
+    } else if (g_move_blend >=
                g_player_control.move_run_threshold ||
-               input_strength >= g_player_control.run_threshold) {
+               g_move_blend >= g_player_control.run_threshold) {
         movement_multiplier =
             g_player_control.run_speed;
     }
