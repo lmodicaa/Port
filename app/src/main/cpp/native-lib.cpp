@@ -3697,6 +3697,11 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
          * Procesar huesos
          * --------------------------------------------------------
          */
+        Mat4 local_bones[96];
+        for (int i = 0; i < 96; ++i) {
+            local_bones[i] = mat4_identity();
+        }
+
         for (
             size_t bone_idx = 0;
             bone_idx < g_cash_model.bones.size() && bone_idx < 96;
@@ -3947,27 +3952,83 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             }
             /*
              * --------------------------------------------------------
-             * Jerarquía
+             * Guardar matriz local.
+             *
+             * La jerarquía se resuelve después de procesar TODOS los
+             * huesos. Así no importa si el padre aparece después del hijo
+             * en el FrameList.
              * --------------------------------------------------------
              */
-            if (
-                bone.parent != 0xFFFFFFFF &&
-                bone.parent < bone_idx
-            ) {
-                if (g_cash_skin_convention & 2) {
-                    global_bones[bone_idx] = mat4_mul(
-                        local_mat,
-                        global_bones[bone.parent]
-                    );
-                } else {
-                    global_bones[bone_idx] = mat4_mul(
-                        global_bones[bone.parent],
-                        local_mat
-                    );
+            local_bones[bone_idx] = local_mat;
+        }
+
+        // ------------------------------------------------------------
+        // Resolver la jerarquía completa recursivamente.
+        // ------------------------------------------------------------
+        int global_state[96] = {};
+
+        auto build_global_bone =
+            [&](auto&& self, size_t idx) -> void {
+                if (idx >= g_cash_model.bones.size() ||
+                    idx >= 96) {
+                    return;
                 }
-            } else {
-                global_bones[bone_idx] = local_mat;
-            }
+
+                if (global_state[idx] == 2) {
+                    return;
+                }
+
+                if (global_state[idx] == 1) {
+                    // Ciclo defensivo: usar la transformación local.
+                    global_bones[idx] = local_bones[idx];
+                    global_state[idx] = 2;
+                    return;
+                }
+
+                global_state[idx] = 1;
+
+                const uint32_t parent =
+                    g_cash_model.bones[idx].parent;
+
+                if (parent != 0xFFFFFFFF &&
+                    parent < g_cash_model.bones.size() &&
+                    parent < 96 &&
+                    parent != idx) {
+
+                    self(
+                        self,
+                        static_cast<size_t>(parent)
+                    );
+
+                    if (g_cash_skin_convention & 2) {
+                        global_bones[idx] =
+                            mat4_mul(
+                                local_bones[idx],
+                                global_bones[parent]
+                            );
+                    } else {
+                        global_bones[idx] =
+                            mat4_mul(
+                                global_bones[parent],
+                                local_bones[idx]
+                            );
+                    }
+                } else {
+                    global_bones[idx] =
+                        local_bones[idx];
+                }
+
+                global_state[idx] = 2;
+            };
+
+        for (size_t bone_idx = 0;
+             bone_idx < g_cash_model.bones.size() &&
+             bone_idx < 96;
+             ++bone_idx) {
+            build_global_bone(
+                build_global_bone,
+                bone_idx
+            );
         }
 
         // ------------------------------------------------------------
