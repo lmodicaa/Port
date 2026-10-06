@@ -967,9 +967,13 @@ static float locomotion_root_motion_speed(
     // original de la animación. La mayoría valen 1.0; Sneak_Walk es 1.2.
     float speed_multiplier = 1.0f;
     if (family == std::string("Sneak_Walk_")) {
-        speed_multiplier = g_sneak_pressed
-            ? g_player_control.sneak_run_speed
-            : g_player_control.sneak_walk_speed;
+        speed_multiplier =
+            (g_sneak_pressed &&
+             animation_input >=
+                 std::max(g_player_control.move_run_threshold,
+                          g_player_control.run_threshold))
+                ? g_player_control.sneak_run_speed
+                : g_player_control.sneak_walk_speed;
     } else if (family == std::string("Sprint_")) {
         speed_multiplier = g_player_control.sprint_speed;
     } else if (family == std::string("Walk_")) {
