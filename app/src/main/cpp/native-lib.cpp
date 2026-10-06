@@ -1047,6 +1047,73 @@ static float find_floor(float px, float search_y, float pz) {
     return best;
 }
 
+// Raycast vertical hacia arriba usando la geometría BSP del nivel.
+// El origen del actor corresponde a y=0 del COL "player" y su altura
+// real es 2.0 unidades en Asylum.
+static float find_ceiling(float px, float search_y, float pz) {
+    float best = 1e9f;
+    const Vec3 ray_o = {px, search_y, pz};
+    const Vec3 ray_d = {0, 1, 0};
+
+    const std::vector<Tri>* tris = g_col_grid.get(px, pz);
+    if (!tris) return best;
+
+    for (const auto& tri : *tris) {
+        const Vec3 e1 = {
+            tri.b.x - tri.a.x,
+            tri.b.y - tri.a.y,
+            tri.b.z - tri.a.z
+        };
+        const Vec3 e2 = {
+            tri.c.x - tri.a.x,
+            tri.c.y - tri.a.y,
+            tri.c.z - tri.a.z
+        };
+
+        Vec3 n = vec3_cross(e1, e2);
+        const float nlen = sqrtf(
+            n.x*n.x +
+            n.y*n.y +
+            n.z*n.z
+        );
+        if (nlen < 1e-6f) continue;
+
+        n.x /= nlen;
+        n.y /= nlen;
+        n.z /= nlen;
+
+        // Solo superficies orientadas hacia abajo pueden actuar como
+        // techo. Las paredes y el suelo quedan fuera.
+        if (n.y > -0.30f) continue;
+
+        const Vec3 h = vec3_cross(ray_d, e2);
+        const float det = vec3_dot(e1, h);
+        if (fabsf(det) < 1e-6f) continue;
+
+        const float inv_det = 1.0f / det;
+        const Vec3 rel = {
+            ray_o.x - tri.a.x,
+            ray_o.y - tri.a.y,
+            ray_o.z - tri.a.z
+        };
+
+        const float u = vec3_dot(rel, h) * inv_det;
+        if (u < 0.0f || u > 1.0f) continue;
+
+        const Vec3 q = vec3_cross(rel, e1);
+        const float v = vec3_dot(ray_d, q) * inv_det;
+        if (v < 0.0f || u + v > 1.0f) continue;
+
+        const float t = vec3_dot(e2, q) * inv_det;
+        if (t < 0.0f || t > 200.0f) continue;
+
+        const float hit_y = search_y + t;
+        if (hit_y < best) best = hit_y;
+    }
+
+    return best;
+}
+
 static Vec3 rotate_player_local(Vec3 p) {
     const float c = cosf(g_player_yaw);
     const float s = sinf(g_player_yaw);
@@ -2138,15 +2205,90 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
 
     // Gravedad
     g_vel_y += GRAVITY * dt;
-    g_player_pos.y += g_vel_y * dt;
 
-    float floor_y = find_floor(g_player_pos.x, waist_y, g_player_pos.z);
-    if (g_player_pos.y < floor_y) {
-        g_player_pos.y = floor_y;
-        g_vel_y = 0.f;
-        g_on_ground = true;
-    } else {
+    // Resolver el movimiento vertical en pasos pequeños, igual que
+    // el desplazamiento horizontal, para evitar atravesar suelo o techo.
+    const float vertical_move = g_vel_y * dt;
+    const float vertical_distance = fabsf(vertical_move);
+    const float max_vertical_step = 0.10f;
+    const int vertical_steps = std::max(
+        1,
+        std::min(
+            16,
+            static_cast<int>(
+                std::ceil(
+                    vertical_distance /
+                    max_vertical_step
+                )
+            )
+        )
+    );
+
+    const float vertical_step =
+        vertical_move /
+        static_cast<float>(vertical_steps);
+
+    for (int step = 0; step < vertical_steps; ++step) {
+        const float next_y =
+            g_player_pos.y + vertical_step;
+
+        if (vertical_step < 0.0f) {
+            // El punto de apoyo del player COL está en local Y=0.
+            // Por eso el suelo se traduce directamente en la posición
+            // vertical del actor.
+            const float floor_y = find_floor(
+                g_player_pos.x,
+                std::max(
+                    g_player_pos.y + 1.0f,
+                    next_y + 2.0f
+                ),
+                g_player_pos.z
+            );
+
+            if (floor_y > -1e8f &&
+                next_y < floor_y) {
+                g_player_pos.y = floor_y;
+                g_vel_y = 0.0f;
+                g_on_ground = true;
+                continue;
+            }
+        } else {
+            // La parte superior del player COL está en Y=2.0.
+            // Impedimos atravesar techos mientras asciende.
+            const float head_y = next_y + g_player_collision_height;
+            const float ceiling_y = find_ceiling(
+                g_player_pos.x,
+                g_player_pos.y + 1.5f,
+                g_player_pos.z
+            );
+
+            if (ceiling_y < 1e8f &&
+                head_y > ceiling_y) {
+                g_player_pos.y =
+                    ceiling_y -
+                    g_player_collision_height;
+                g_vel_y = 0.0f;
+                continue;
+            }
+        }
+
+        g_player_pos.y = next_y;
         g_on_ground = false;
+    }
+
+    // Una comprobación final evita quedar ligeramente por debajo del suelo
+    // por errores de redondeo después del último paso.
+    const float final_floor_y = find_floor(
+        g_player_pos.x,
+        g_player_pos.y + 1.0f,
+        g_player_pos.z
+    );
+
+    if (final_floor_y > -1e8f &&
+        g_player_pos.y < final_floor_y) {
+        g_player_pos.y = final_floor_y;
+        g_vel_y = 0.0f;
+        g_on_ground = true;
     }
 
     // ── Cámara Orbit ───────────────────────────────────────────────────────
