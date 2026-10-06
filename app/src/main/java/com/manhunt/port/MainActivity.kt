@@ -30,7 +30,7 @@ class MainActivity : Activity() {
     private var rightLastY = 0f
     // Sensibilidad del arrastre táctil: píxeles de desplazamiento para alcanzar
     // la velocidad máxima de la zona de apuntado.
-    private val TOUCH_AIM_DISTANCE = 28f
+    private val TOUCH_AIM_DISTANCE = 14f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
