@@ -641,23 +641,37 @@ static void rebuild_col_inst_collisions() {
     size_t spheres = 0;
     size_t lines = 0;
     size_t invalid_faces = 0;
-    size_t missing_collision_data = 0;
+    size_t missing_type_data_col = 0;
+    size_t missing_model_fallback_col = 0;
     std::map<std::string, size_t> unmatched_models;
+    std::map<std::string, size_t> unmatched_type_data;
 
     for (const auto& inst : g_insts) {
-        const std::string collision_name =
-            collision_data_for_instance(inst);
+        const std::string record_name =
+            normalize_col_name(inst.name);
+
+        const auto type_it =
+            g_entity_collision_data.find(record_name);
 
         const bool used_type_data =
-            g_entity_collision_data.find(
-                normalize_col_name(inst.name)
-            ) != g_entity_collision_data.end();
+            type_it != g_entity_collision_data.end() &&
+            !type_it->second.empty();
+
+        const std::string collision_name =
+            used_type_data
+                ? type_it->second
+                : normalize_col_name(inst.model);
 
         const ColModel* col =
             find_col_model(collision_name);
 
         if (!col) {
-            ++missing_collision_data;
+            if (used_type_data) {
+                ++missing_type_data_col;
+                ++unmatched_type_data[collision_name];
+            } else {
+                ++missing_model_fallback_col;
+            }
             ++unmatched_models[collision_name];
             continue;
         }
@@ -746,7 +760,7 @@ static void rebuild_col_inst_collisions() {
         "COL inst collisions: matched=%zu skippedActors=%zu "
         "byTypeData=%zu byModelFallback=%zu meshFaces=%zu "
         "boxes=%zu lines=%zu spheres=%zu invalidFaces=%zu "
-        "missingCollisionData=%zu unmatchedNames=%zu",
+        "missingTypeDataCOL=%zu missingFallbackCOL=%zu unmatchedNames=%zu",
         matched_instances,
         skipped_actor_instances,
         matched_by_type_data,
@@ -756,7 +770,8 @@ static void rebuild_col_inst_collisions() {
         lines,
         spheres,
         invalid_faces,
-        missing_collision_data,
+        missing_type_data_col,
+        missing_model_fallback_col,
         unmatched_models.size()
     );
 
@@ -766,6 +781,17 @@ static void rebuild_col_inst_collisions() {
         LOGI(
             "COL UNMATCHED[%zu]: collision=%s x%zu",
             shown_unmatched,
+            pair.first.c_str(),
+            pair.second
+        );
+    }
+
+    size_t shown_type_unmatched = 0;
+    for (const auto& pair : unmatched_type_data) {
+        if (shown_type_unmatched++ >= 20) break;
+        LOGI(
+            "COL TYPE-DATA-MISSING[%zu]: collision=%s x%zu",
+            shown_type_unmatched,
             pair.first.c_str(),
             pair.second
         );
