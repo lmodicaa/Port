@@ -26,8 +26,9 @@ class MainActivity : Activity() {
 
     // ── Estado del toque derecho (mirar) ─────────────────────────────────────
     private var rightPointerId = -1
-    private var rightPrevX = 0f
-    private var rightPrevY = 0f
+    private var rightStartX = 0f
+    private var rightStartY = 0f
+    private val RIGHT_STICK_RADIUS = 200f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,8 +59,9 @@ class MainActivity : Activity() {
                         } else {
                             // Lado derecho → mirar
                             rightPointerId = pId
-                            rightPrevX     = px
-                            rightPrevY     = py
+                            rightStartX    = px
+                            rightStartY    = py
+                            renderer.nativeLook(0f, 0f)
                         }
                     }
 
@@ -84,9 +86,17 @@ class MainActivity : Activity() {
                                     renderer.nativeMove(fwd, right)
                                 }
                                 rightPointerId -> {
-                                    renderer.nativeLook(cx - rightPrevX, cy - rightPrevY)
-                                    rightPrevX = cx
-                                    rightPrevY = cy
+                                    var dx = cx - rightStartX
+                                    var dy = cy - rightStartY
+                                    val dist = hypot(dx, dy)
+                                    if (dist > RIGHT_STICK_RADIUS) {
+                                        dx *= RIGHT_STICK_RADIUS / dist
+                                        dy *= RIGHT_STICK_RADIUS / dist
+                                    }
+                                    renderer.nativeLook(
+                                        dx / RIGHT_STICK_RADIUS,
+                                        dy / RIGHT_STICK_RADIUS
+                                    )
                                 }
                             }
                         }
