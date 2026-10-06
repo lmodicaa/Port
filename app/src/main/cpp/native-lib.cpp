@@ -127,7 +127,7 @@ static Mat4 mat4_from_pos_cash(Vec3 pos, float yaw) {
     r.m[7] = 0.0f;
 
     r.m[8] = 0.0f;
-    r.m[9] = -1.0f;
+    r.m[9] = 1.0f;
     r.m[10] = 0.0f;
     r.m[11] = 0.0f;
 
