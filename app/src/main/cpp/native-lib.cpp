@@ -4441,7 +4441,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeMove(JNIEnv*, jobject, jfloat fwd, j
 // Manhunt usa por defecto una cámara "fixed behind": el giro horizontal
 // rota al personaje y la cámara permanece detrás de él. No dejamos que
 // la cámara orbite libremente alrededor de Cash.
-JNIEXPORT void JNICALL
+
 static double g_last_aim_update = 0.0;
 static bool g_aim_clock_started = false;
 static float g_aim_hold_time = 0.0f;
