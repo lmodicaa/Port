@@ -202,10 +202,15 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                             frame_index;
                     }
 
-                    LOGI(
-                        "Atomic: frameIndex=%u",
-                        frame_index
-                    );
+                    // Evitar inundar Logcat al cargar muchos Atomics.
+                    static uint32_t atomic_log_count = 0;
+                    if (atomic_log_count < 8) {
+                        LOGI(
+                            "Atomic: frameIndex=%u",
+                            frame_index
+                        );
+                        ++atomic_log_count;
+                    }
                 }
             }
 
