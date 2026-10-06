@@ -4527,7 +4527,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
         g_aim_hold_time = 0.0f;
     }
 
-    if (horizontal_speed > 0.0f) {
+    if (horizontal_speed > 0.0f && fabsf(x) > 0.001f) {
         const float yaw_delta =
             yaw_speed * (3.14159265359f / 180.0f) * x * dt;
         g_player_yaw -= yaw_delta;
