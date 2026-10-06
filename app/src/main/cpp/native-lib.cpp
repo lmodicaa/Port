@@ -2336,11 +2336,14 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 g_player_pos.z
             );
 
-            // Durante una caída, el suelo válido debe estar en o por
-            // debajo de la posición actual. Un techo visto por debajo
-            // del origen del raycast no puede elevar al actor.
+            // En una pendiente el suelo puede quedar ligeramente por
+            // encima de la posición actual durante el avance horizontal.
+            // Permitimos recuperar hasta la misma altura máxima que un
+            // escalón pequeño, pero nunca "teletransportar" al actor a una
+            // plataforma mucho más alta.
             if (floor_y > -1e8f &&
-                floor_y <= g_player_pos.y + 0.02f &&
+                floor_y <= g_player_pos.y +
+                    PLAYER_MAX_STEP_HEIGHT + 0.02f &&
                 next_y < floor_y) {
                 g_player_pos.y = floor_y;
                 g_vel_y = 0.0f;
@@ -2380,7 +2383,8 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     );
 
     if (final_floor_y > -1e8f &&
-        final_floor_y <= g_player_pos.y + 0.02f &&
+        final_floor_y <= g_player_pos.y +
+            PLAYER_MAX_STEP_HEIGHT + 0.02f &&
         g_player_pos.y < final_floor_y) {
         g_player_pos.y = final_floor_y;
         g_vel_y = 0.0f;
