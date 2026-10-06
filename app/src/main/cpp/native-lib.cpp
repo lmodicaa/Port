@@ -17,6 +17,7 @@
 #include <map>
 #include <dirent.h>
 #include <ctime>
+#include <chrono>
 #include "txd_loader.h"
 #include "dff_loader.h"
 #include "inst_loader.h"
@@ -848,9 +849,13 @@ struct PlayerControlConfig {
     float crouch_backward_speed = 0.90f;
     float crouch_sideways_speed = 1.20f;
 
+    float aim_axis_width = 10.0f;
+    float aim_zones[10] = {3.0f, 8.0f, 12.0f, 18.0f, 25.0f, 35.0f, 45.0f, 57.0f, 76.0f, 125.0f};
+    float vertical_aim_limit = 9.30f;
     float turn_pause = 0.27f;
     float turn_acceleration = 4.0f;
     float extra_turn_speed = 50.0f;
+    float max_quick_turn_speed = 60.0f;
     float run_threshold = 0.95f;
 };
 
@@ -1116,12 +1121,38 @@ static void parse_entity_type_data(
                 parts >> g_player_control.crouch_backward_speed;
             } else if (lower_key == "crouch_sideways_speed") {
                 parts >> g_player_control.crouch_sideways_speed;
+            } else if (lower_key == "aim_axis_width") {
+                parts >> g_player_control.aim_axis_width;
+            } else if (lower_key == "aim_zone_1") {
+                parts >> g_player_control.aim_zones[0];
+            } else if (lower_key == "aim_zone_2") {
+                parts >> g_player_control.aim_zones[1];
+            } else if (lower_key == "aim_zone_3") {
+                parts >> g_player_control.aim_zones[2];
+            } else if (lower_key == "aim_zone_4") {
+                parts >> g_player_control.aim_zones[3];
+            } else if (lower_key == "aim_zone_5") {
+                parts >> g_player_control.aim_zones[4];
+            } else if (lower_key == "aim_zone_6") {
+                parts >> g_player_control.aim_zones[5];
+            } else if (lower_key == "aim_zone_7") {
+                parts >> g_player_control.aim_zones[6];
+            } else if (lower_key == "aim_zone_8") {
+                parts >> g_player_control.aim_zones[7];
+            } else if (lower_key == "aim_zone_9") {
+                parts >> g_player_control.aim_zones[8];
+            } else if (lower_key == "aim_zone_10") {
+                parts >> g_player_control.aim_zones[9];
+            } else if (lower_key == "vertical_aim_limit") {
+                parts >> g_player_control.vertical_aim_limit;
             } else if (lower_key == "turn_pause") {
                 parts >> g_player_control.turn_pause;
             } else if (lower_key == "turn_acceleration") {
                 parts >> g_player_control.turn_acceleration;
             } else if (lower_key == "extra_turn_speed") {
                 parts >> g_player_control.extra_turn_speed;
+            } else if (lower_key == "max_quick_turn_speed") {
+                parts >> g_player_control.max_quick_turn_speed;
             } else if (lower_key == "run_threshold") {
                 parts >> g_player_control.run_threshold;
             }
@@ -4411,18 +4442,100 @@ Java_com_manhunt_port_ManhuntRenderer_nativeMove(JNIEnv*, jobject, jfloat fwd, j
 // rota al personaje y la cámara permanece detrás de él. No dejamos que
 // la cámara orbite libremente alrededor de Cash.
 JNIEXPORT void JNICALL
-Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jfloat dy) {
-    const float SENS = 0.003f;
+static std::chrono::steady_clock::time_point g_last_aim_update;
+static bool g_aim_clock_started = false;
+static float g_aim_hold_time = 0.0f;
 
-    if (dx == 0.0f) {
+static float aim_zone_speed(float stick_distance, bool vertical) {
+    const float dead = std::max(0.001f, g_player_control.stick_dead_zone);
+    float d = (stick_distance - dead) / std::max(0.001f, 1.0f - dead);
+    d = std::max(0.0f, std::min(1.0f, d));
+
+    float zone_pos = d * 10.0f;
+    if (vertical) {
+        zone_pos = std::min(zone_pos, g_player_control.vertical_aim_limit);
+    }
+    if (zone_pos <= 0.0f) return 0.0f;
+    if (zone_pos >= 10.0f) return g_player_control.aim_zones[9];
+
+    const float exact = zone_pos - 1.0f;
+    const int lo = std::max(0, std::min(8, static_cast<int>(std::floor(exact))));
+    const float t = exact - static_cast<float>(lo);
+    return g_player_control.aim_zones[lo] * (1.0f - t) +
+           g_player_control.aim_zones[lo + 1] * t;
+}
+
+static float snap_aim_angle(float angle) {
+    const float width = g_player_control.aim_axis_width * 3.14159265359f / 180.0f;
+    const float step = 3.14159265359f / 4.0f;
+    const float nearest = std::round(angle / step) * step;
+    const float delta = atan2f(sinf(angle - nearest), cosf(angle - nearest));
+    return fabsf(delta) <= width ? nearest : angle;
+}
+
+JNIEXPORT void JNICALL
+Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_x, jfloat stick_y) {
+    const auto now = std::chrono::steady_clock::now();
+    float dt = 0.016f;
+    if (g_aim_clock_started) {
+        dt = std::chrono::duration<float>(now - g_last_aim_update).count();
+        dt = std::max(0.001f, std::min(0.05f, dt));
+    }
+    g_last_aim_update = now;
+    g_aim_clock_started = true;
+
+    const float distance = std::sqrt(stick_x * stick_x + stick_y * stick_y);
+    if (distance <= g_player_control.stick_dead_zone) {
+        g_aim_hold_time = 0.0f;
         g_turn_gesture_active = false;
         g_turn_gesture_amount = 0.0f;
         g_turn_anim = nullptr;
+        return;
+    }
+
+    float x = stick_x;
+    float y = stick_y;
+    const float len = std::max(distance, 0.0001f);
+    x /= len;
+    y /= len;
+
+    const float angle = atan2f(x, -y);
+    const float snapped = snap_aim_angle(angle);
+    x = sinf(snapped);
+    y = -cosf(snapped);
+
+    const float horizontal_speed = aim_zone_speed(distance, false);
+    const float vertical_speed = aim_zone_speed(distance, true);
+
+    float yaw_speed = horizontal_speed;
+    const bool full_horizontal =
+        fabsf(y) < 0.17365f && distance >= 0.99f;
+
+    if (full_horizontal) {
+        g_aim_hold_time += dt;
+        if (g_aim_hold_time > g_player_control.turn_pause) {
+            const float accel_t =
+                std::min(1.0f,
+                    (g_aim_hold_time - g_player_control.turn_pause) /
+                    std::max(0.001f, g_player_control.turn_acceleration));
+            yaw_speed += g_player_control.extra_turn_speed * accel_t;
+        } else {
+            yaw_speed = std::min(yaw_speed,
+                                 g_player_control.max_quick_turn_speed);
+        }
     } else {
-        g_turn_gesture_amount += fabsf(dx * SENS);
-        if (!g_turn_gesture_active && g_turn_gesture_amount > 0.0f) {
+        g_aim_hold_time = 0.0f;
+    }
+
+    if (horizontal_speed > 0.0f) {
+        const float yaw_delta =
+            yaw_speed * (3.14159265359f / 180.0f) * x * dt;
+        g_player_yaw -= yaw_delta;
+
+        if (!g_turn_gesture_active) {
             g_turn_gesture_active = true;
-            const char* wanted = dx > 0.0f ? "Stand_Turn_Right" : "Stand_Turn";
+            const char* wanted =
+                x > 0.0f ? "Stand_Turn_Right" : "Stand_Turn";
             const std::string query = to_lower(wanted);
             g_turn_anim = nullptr;
             for (const auto& pair : g_anims) {
@@ -4432,16 +4545,16 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
                 }
             }
             if (g_turn_anim) {
-                LOGI("TURN GESTURE: dx=%.3f anim=%s", dx, g_turn_anim->name.c_str());
-            } else {
-                LOGI("TURN GESTURE: dx=%.3f anim=%s NOT FOUND", dx, wanted);
+                LOGI("TURN GESTURE: stick=(%.2f,%.2f) anim=%s",
+                     stick_x, stick_y, g_turn_anim->name.c_str());
             }
         }
     }
-    g_player_yaw -= dx * SENS;
-    g_cam_yaw = g_player_yaw;
 
-    g_cam_pitch -= dy * SENS;
+    g_cam_yaw = g_player_yaw;
+    const float pitch_delta =
+        vertical_speed * (3.14159265359f / 180.0f) * y * dt;
+    g_cam_pitch -= pitch_delta;
     g_cam_pitch = std::max(-1.0f, std::min(1.0f, g_cam_pitch));
 }
 
@@ -4508,4 +4621,3 @@ Java_com_manhunt_port_ManhuntRenderer_nativeJump(JNIEnv*, jobject) {
 // Mantener compatibilidad con nativeDrag/nativeScale anteriores (los elimino)
 
 } // extern "C"
-// AIM PORT TEST MARKER
