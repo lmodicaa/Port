@@ -3222,7 +3222,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 return nullptr;
             }(),
             g_anim_time,
-            dt * input_strength,
+            dt,
             &root_delta_local
         );
 
@@ -3248,10 +3248,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             ? root_distance / std::max(dt, 0.0001f)
             : MOVE_SPEED_FALLBACK;
 
-    // La magnitud del stick ya se aplicó al tiempo de la animación/root
-    // motion. No volver a multiplicarla aquí: de lo contrario el jugador
-    // se desplaza al cuadrado de la intensidad y los pies vuelven a
-    // desincronizarse.
+    // La locomoción Walk usa la velocidad completa de su animación.
+    // La intensidad del stick solo determina si hay movimiento, no ralentiza
+    // artificialmente el ciclo ni el desplazamiento del personaje.
     const float move_dx = vel_xz.x * movement_speed * dt;
     const float move_dz = vel_xz.z * movement_speed * dt;
 
@@ -4107,17 +4106,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             }
         }
 
-        // La velocidad de reproducción de la locomoción sigue la magnitud
-        // analógica del stick. Así, si el jugador avanza lentamente,
-        // la animación de Walk también avanza lentamente y los pies no
-        // se deslizan respecto al desplazamiento físico.
-        float animation_dt = dt;
-        if (anim &&
-            is_looping_locomotion_animation(anim) &&
-            input_strength > 0.01f) {
-            animation_dt *= input_strength;
-        }
-        g_anim_time += animation_dt;
+        // Las animaciones de locomoción se reproducen a su velocidad
+        // normal. La intensidad del stick no ralentiza artificialmente Walk.
+        g_anim_time += dt;
 
         float animation_time = 0.0f;
         if (anim && anim->duration > 0.0f) {
