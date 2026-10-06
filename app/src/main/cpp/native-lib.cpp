@@ -764,10 +764,6 @@ static bool g_turn_gesture_consumed = false;
 // Animación de giro actualmente en reproducción. Se deja terminar aunque
 // el dedo siga apoyado, tal como una animación de transición no-loop.
 static int g_turn_anim_active = 0; // -1 izquierda, +1 derecha
-// Yaw visual de Cash durante una animación de giro.
-// El yaw lógico puede responder inmediatamente al stick/touch, pero el
-// modelo conserva su orientación de inicio hasta completar Stand_Turn_*.
-static float g_turn_visual_yaw = 0.0f;
 
 // Movimiento joystick (actualizados desde Kotlin)
 static float g_move_fwd   = 0.f;  // -1..1  (adelante/atrás)
@@ -4328,14 +4324,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 g_cash_pos_adjust.z
             }
         );
-        const float cash_visual_yaw =
-            g_turn_anim_active != 0
-                ? g_turn_visual_yaw
-                : g_player_yaw;
-
         Mat4 cash_model_m = mat4_from_pos_cash(
             center_pos,
-            cash_visual_yaw + CASH_MODEL_YAW_OFFSET
+            g_player_yaw + CASH_MODEL_YAW_OFFSET
         );
 
         // Temporary visual-calibration rotation, applied after the
@@ -4444,9 +4435,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
         // animación. Los siguientes eventos mantienen el giro físico,
         // pero no vuelven a iniciar Stand_Turn_* cuando termina.
         if (!g_turn_gesture_consumed) {
-            // Capturar la orientación visual ANTES de aplicar el yaw físico.
-            // Así Stand_Turn_* no aparece después de que Cash ya terminó de girar.
-            g_turn_visual_yaw = g_player_yaw;
             g_turn_anim_request = turn_sign;
             g_turn_input_sign = turn_sign;
             g_turn_gesture_consumed = true;
