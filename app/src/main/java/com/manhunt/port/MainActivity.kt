@@ -151,7 +151,7 @@ class MainActivity : Activity() {
         fun refreshAimSensitivity() {
             val percent = aimSensitivity.progress.coerceIn(0, 100)
             if (percent == 0) {
-                touchAimDistance = Float.POSITIVE_INFINITY
+                touchAimDistance = 60f
             } else {
                 touchAimDistance = 60f - (percent * 0.54f)
             }
