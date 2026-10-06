@@ -110,20 +110,18 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                 r.pos = ext_end; // fix any bad size reading
             }
 
-            // Mapear matrix_index usando HAnim Hierarchy
+            // La matriz de Skin está indexada por el índice del hueso
+            // dentro del skeleton/frame list. HAnim no remapea esta matriz:
+            // HAnim se usa para resolver bone_id -> frame index cuando
+            // reproducimos las animaciones IFP.
             for (uint32_t i = 0; i < frameCount; i++) {
-                if (model.bones[i].bone_id != 0xFFFFFFFF) {
-                    auto it = model.bone_id_to_index.find(model.bones[i].bone_id);
-                    if (it != model.bone_id_to_index.end()) {
-                        model.bones[i].matrix_index = it->second;
-                    } else {
-                        model.bones[i].matrix_index = 0xFFFFFFFF;
-                    }
-                } else {
-                    model.bones[i].matrix_index = 0xFFFFFFFF;
-                }
+                model.bones[i].matrix_index = i;
             }
-            LOGI("FrameList: %u frames. Mapping resuelto con HAnim.", frameCount);
+            LOGI(
+                "FrameList: %u frames. HAnim reservado para bone_id -> frame index; "
+                "Skin matrix_index usa directamente el frame index.",
+                frameCount
+            );
             
             r.pos = frame_end;
             continue;
