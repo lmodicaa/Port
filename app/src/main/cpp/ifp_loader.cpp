@@ -231,6 +231,7 @@ static AnimationTrack readTrack(Reader2& reader)
      * Frame type
      */
     const uint8_t frameType = reader.u8();
+    track.frame_type = frameType;
 
     /*
      * Number of frames
@@ -259,10 +260,23 @@ static AnimationTrack readTrack(Reader2& reader)
 
     if (frameType == 3) {
 
+        // FrameType 3 stores a constant initial direction quaternion.
         initialQx = decodeQuat(reader.i16());
         initialQy = decodeQuat(reader.i16());
         initialQz = decodeQuat(reader.i16());
         initialQw = decodeQuat(reader.i16());
+
+        // When StartTime > 0 the format contains one additional
+        // 16-bit value before the initialization position.
+        if (startTime > 0) {
+            (void)reader.u16();
+        }
+
+        // FrameType 3 also stores an initialization position before
+        // the per-frame translations.
+        track.initial_tx = decodeTranslation(reader.i16());
+        track.initial_ty = decodeTranslation(reader.i16());
+        track.initial_tz = decodeTranslation(reader.i16());
 
     } else {
 
@@ -346,9 +360,8 @@ static AnimationTrack readTrack(Reader2& reader)
 
             /*
              * FrameType 3 does not have a quaternion
-             * for every frame.
-             *
-             * Use the initial orientation.
+             * for every frame. Use the sequence's initial
+             * direction as the constant orientation.
              */
             keyframe.qx = initialQx;
             keyframe.qy = initialQy;
@@ -362,7 +375,7 @@ static AnimationTrack readTrack(Reader2& reader)
          * ----------------------------------------------------
          */
 
-        if (frameType == 2 || frameType == 3) {
+        if (frameType == 2) {
 
             readTranslation(
                 reader,
@@ -370,6 +383,21 @@ static AnimationTrack readTrack(Reader2& reader)
                 keyframe.ty,
                 keyframe.tz
             );
+
+        } else if (frameType == 3) {
+
+            readTranslation(
+                reader,
+                keyframe.tx,
+                keyframe.ty,
+                keyframe.tz
+            );
+
+            // The initialization position is the sequence's
+            // base position for translation-only tracks.
+            keyframe.tx += track.initial_tx;
+            keyframe.ty += track.initial_ty;
+            keyframe.tz += track.initial_tz;
 
         } else {
 
@@ -573,9 +601,13 @@ std::map<std::string, Animation> load_ifp(
                          animation.tracks)
                     {
                         LOGI(
-                            "Bone=%u Keys=%zu",
+                            "Bone=%u Type=%u Keys=%zu InitP=(%.4f %.4f %.4f)",
                             track.bone_id,
-                            track.keyframes.size()
+                            track.frame_type,
+                            track.keyframes.size(),
+                            track.initial_tx,
+                            track.initial_ty,
+                            track.initial_tz
                         );
 
                         if (!track.keyframes.empty())
