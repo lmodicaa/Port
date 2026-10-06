@@ -7,8 +7,10 @@
 #include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
 #include <string>
+#include <sstream>
 #include <vector>
 #include <cmath>
+#include <cctype>
 #include <cstddef>
 #include <fstream>
 #include <algorithm>
@@ -439,6 +441,11 @@ static std::map<std::string, size_t> g_col_model_by_name;
 static std::vector<std::pair<Vec3, float>> g_col_spheres_world;
 static std::vector<EntityInst> g_insts;
 
+// entityTypeData.ini: RECORD -> COLLISION_DATA.
+// Manhunt uses this indirection instead of requiring the collision
+// resource name to equal the render model name.
+static std::map<std::string, std::string> g_entity_collision_data;
+
 static Vec3 col_to_vec3(const ColVec3& v) {
     return {v.x, v.y, v.z};
 }
@@ -480,6 +487,128 @@ static void add_collision_box(
     }
 }
 
+static std::string trim_copy(std::string s) {
+    const auto not_space = [](unsigned char ch) {
+        return !std::isspace(ch);
+    };
+
+    s.erase(
+        s.begin(),
+        std::find_if(s.begin(), s.end(), not_space)
+    );
+    s.erase(
+        std::find_if(
+            s.rbegin(),
+            s.rend(),
+            not_space
+        ).base(),
+        s.end()
+    );
+    return s;
+}
+
+static void parse_entity_type_data(
+    const std::vector<uint8_t>& raw
+) {
+    g_entity_collision_data.clear();
+
+    if (raw.empty()) return;
+
+    const std::string text(
+        reinterpret_cast<const char*>(raw.data()),
+        raw.size()
+    );
+
+    std::istringstream stream(text);
+    std::string line;
+    std::string current_record;
+
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+
+        line = trim_copy(line);
+        if (line.empty()) continue;
+        if (line[0] == '#') continue;
+
+        // Strip inline comments.
+        const size_t comment = line.find('#');
+        if (comment != std::string::npos) {
+            line = trim_copy(line.substr(0, comment));
+        }
+        if (line.empty()) continue;
+
+        std::istringstream parts(line);
+        std::string key;
+        parts >> key;
+        if (key.empty()) continue;
+
+        if (to_lower(key) == "record") {
+            std::string name;
+            std::getline(parts, name);
+            current_record = normalize_col_name(
+                trim_copy(name)
+            );
+            continue;
+        }
+
+        if (to_lower(key) == "end") {
+            current_record.clear();
+            continue;
+        }
+
+        if (current_record.empty()) continue;
+
+        if (to_lower(key) == "collision_data") {
+            std::string collision_name;
+            parts >> collision_name;
+            if (!collision_name.empty()) {
+                g_entity_collision_data[current_record] =
+                    normalize_col_name(collision_name);
+            }
+        }
+    }
+
+    LOGI(
+        "ENTITY TYPE DATA: %zu records con COLLISION_DATA",
+        g_entity_collision_data.size()
+    );
+}
+
+static std::string collision_data_for_instance(
+    const EntityInst& inst
+) {
+    const std::string record =
+        normalize_col_name(inst.entity_class);
+
+    if (!record.empty()) {
+        const auto type_it =
+            g_entity_collision_data.find(record);
+
+        if (type_it != g_entity_collision_data.end() &&
+            !type_it->second.empty()) {
+            return type_it->second;
+        }
+    }
+
+    // Fallback only when the type-data file is unavailable or the
+    // instance has no matching archetype.
+    return normalize_col_name(inst.model);
+}
+
+static const ColModel* find_col_model(
+    const std::string& collision_name
+) {
+    const auto it = g_col_model_by_name.find(
+        normalize_col_name(collision_name)
+    );
+    if (it == g_col_model_by_name.end()) {
+        return nullptr;
+    }
+    return &g_col_models[it->second];
+}
+
 static void rebuild_col_inst_collisions() {
     g_col_model_by_name.clear();
     g_col_spheres_world.clear();
@@ -496,92 +625,136 @@ static void rebuild_col_inst_collisions() {
     }
 
     for (size_t i = 0; i < g_col_models.size(); ++i) {
-        g_col_model_by_name[normalize_col_name(g_col_models[i].name)] = i;
+        g_col_model_by_name[
+            normalize_col_name(g_col_models[i].name)
+        ] = i;
     }
 
     size_t matched_instances = 0;
     size_t skipped_actor_instances = 0;
+    size_t matched_by_type_data = 0;
+    size_t matched_by_model_fallback = 0;
     size_t mesh_faces = 0;
     size_t boxes = 0;
     size_t spheres = 0;
+    size_t lines = 0;
     size_t invalid_faces = 0;
+    size_t missing_collision_data = 0;
     std::map<std::string, size_t> unmatched_models;
 
     for (const auto& inst : g_insts) {
-        const std::string key = normalize_col_name(inst.model);
-        const auto it = g_col_model_by_name.find(key);
-        if (it == g_col_model_by_name.end()) {
-            ++unmatched_models[inst.model];
+        const std::string collision_name =
+            collision_data_for_instance(inst);
+
+        const bool used_type_data =
+            g_entity_collision_data.find(
+                normalize_col_name(inst.entity_class)
+            ) != g_entity_collision_data.end();
+
+        const ColModel* col =
+            find_col_model(collision_name);
+
+        if (!col) {
+            ++missing_collision_data;
+            ++unmatched_models[collision_name];
             continue;
         }
 
-        const ColModel& col = g_col_models[it->second];
+        if (used_type_data) {
+            ++matched_by_type_data;
+        } else {
+            ++matched_by_model_fallback;
+        }
 
-        if (is_dynamic_actor_col(col.name)) {
+        if (is_dynamic_actor_col(col->name)) {
             ++skipped_actor_instances;
             continue;
         }
 
-        const Mat4 transform = mat4_from_pos_quat(inst.pos, inst.rot);
+        const Mat4 transform =
+            mat4_from_pos_quat(inst.pos, inst.rot);
         ++matched_instances;
 
-        if (matched_instances <= 30) {
+        if (matched_instances <= 40) {
             LOGI(
-                "COL MATCH[%zu]: inst=%s model=%s faces=%zu boxes=%zu spheres=%zu",
+                "COL MATCH[%zu]: entity=%s model=%s class=%s collision=%s faces=%zu boxes=%zu lines=%zu spheres=%zu",
                 matched_instances,
                 inst.name.c_str(),
                 inst.model.c_str(),
-                col.faces.size(),
-                col.boxes.size(),
-                col.spheres.size()
+                inst.entity_class.c_str(),
+                col->name.c_str(),
+                col->faces.size(),
+                col->boxes.size(),
+                col->lines.size(),
+                col->spheres.size()
             );
         }
 
-        for (const auto& face : col.faces) {
-            if (face.a >= col.vertices.size() ||
-                face.b >= col.vertices.size() ||
-                face.c >= col.vertices.size()) {
+        for (const auto& face : col->faces) {
+            if (face.a >= col->vertices.size() ||
+                face.b >= col->vertices.size() ||
+                face.c >= col->vertices.size()) {
                 ++invalid_faces;
                 continue;
             }
 
             const Vec3 a = mat4_transform_point(
-                transform, col_to_vec3(col.vertices[face.a])
+                transform,
+                col_to_vec3(col->vertices[face.a])
             );
             const Vec3 b = mat4_transform_point(
-                transform, col_to_vec3(col.vertices[face.b])
+                transform,
+                col_to_vec3(col->vertices[face.b])
             );
-            const Vec3 c = mat4_transform_point(
-                transform, col_to_vec3(col.vertices[face.c])
+            const Vec3 d = mat4_transform_point(
+                transform,
+                col_to_vec3(col->vertices[face.c])
             );
 
-            g_col_grid.add({a, b, c});
+            g_col_grid.add({a, b, d});
             ++mesh_faces;
         }
 
-        for (const auto& box : col.boxes) {
+        for (const auto& box : col->boxes) {
             add_collision_box(box, transform);
             ++boxes;
         }
 
-        for (const auto& sphere : col.spheres) {
+        // Lines are a first-class primitive in the COL format. Store
+        // them for diagnostics now; actor/player line handling is done
+        // through the original player COL below rather than turning
+        // every entity line into a fake triangle.
+        lines += col->lines.size();
+
+        for (const auto& sphere : col->spheres) {
             const Vec3 center = mat4_transform_point(
-                transform, col_to_vec3(sphere.center)
+                transform,
+                col_to_vec3(sphere.center)
             );
 
-            g_col_spheres_world.push_back({center, sphere.radius});
+            g_col_spheres_world.push_back({
+                center,
+                sphere.radius
+            });
             ++spheres;
         }
     }
 
     LOGI(
-        "COL inst collisions: matched=%zu skippedActors=%zu meshFaces=%zu boxes=%zu spheres=%zu invalidFaces=%zu unmatchedModels=%zu",
+        "COL inst collisions: matched=%zu skippedActors=%zu "
+        "byTypeData=%zu byModelFallback=%zu meshFaces=%zu "
+        "boxes=%zu lines=%zu spheres=%zu invalidFaces=%zu "
+        "missingCollisionData=%zu unmatchedNames=%zu",
         matched_instances,
         skipped_actor_instances,
+        matched_by_type_data,
+        matched_by_model_fallback,
         mesh_faces,
         boxes,
+        lines,
         spheres,
         invalid_faces,
+        missing_collision_data,
         unmatched_models.size()
     );
 
@@ -589,13 +762,14 @@ static void rebuild_col_inst_collisions() {
     for (const auto& pair : unmatched_models) {
         if (shown_unmatched++ >= 20) break;
         LOGI(
-            "COL UNMATCHED[%zu]: %s x%zu",
+            "COL UNMATCHED[%zu]: collision=%s x%zu",
             shown_unmatched,
             pair.first.c_str(),
             pair.second
         );
     }
 }
+
 
 static std::map<std::string, DFFModel> g_models;
 
@@ -1583,6 +1757,39 @@ static void setup_model() {
         }
 
         g_col_spheres_world.clear();
+
+        // El juego define qué COL usar mediante COLLISION_DATA en
+        // entityTypeData.ini. Probamos las ubicaciones usadas por MH1.
+        const char* type_data_paths[] = {
+            "entityTypeData.ini",
+            "levels/GLOBAL/entityTypeData.ini",
+            "levels/global/entityTypeData.ini",
+            "levels/GLOBAL/AllEntitiesTypeData.ini",
+            "levels/global/AllEntitiesTypeData.ini"
+        };
+
+        g_entity_collision_data.clear();
+        for (const char* type_path : type_data_paths) {
+            auto type_raw = read_asset(type_path);
+            if (!type_raw.empty()) {
+                LOGI(
+                    "ENTITY TYPE DATA cargado: %s (%zu bytes)",
+                    type_path,
+                    type_raw.size()
+                );
+                parse_entity_type_data(type_raw);
+                if (!g_entity_collision_data.empty()) {
+                    break;
+                }
+            }
+        }
+
+        if (g_entity_collision_data.empty()) {
+            LOGI(
+                "ENTITY TYPE DATA no disponible; fallback modelo->COL"
+            );
+        }
+
         rebuild_col_inst_collisions();
     } else {
         LOGE("No se encontró levels/asylum/collisions.col");
