@@ -206,8 +206,10 @@ class MainActivity : Activity() {
         }
 
         fun refreshAimSensitivity() {
-            touchAimDistance = aimSensitivity.progress.toFloat().coerceAtLeast(5f)
-            val sensitivity = 100f / touchAimDistance
+            // 1..30: más a la derecha = más sensibilidad.
+            val level = aimSensitivity.progress.coerceIn(1, 30)
+            touchAimDistance = 42f - (level - 1) * (36f / 29f)
+            val sensitivity = 14f / touchAimDistance
             aimSensitivityLabel.text = "Sensibilidad táctil: %.1fx".format(sensitivity)
         }
 
