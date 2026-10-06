@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <fstream>
 #include <algorithm>
+#include <map>
 #include <dirent.h>
 #include <ctime>
 #include "txd_loader.h"
@@ -194,6 +195,33 @@ static void dump_cash_debug(const DFFModel& model);
 
 static std::string to_lower(std::string s) {
     for (char& c : s) c = tolower((unsigned char)c);
+    return s;
+}
+
+static std::string normalize_col_name(std::string s) {
+    s = to_lower(std::move(s));
+
+    for (char& c : s) {
+        if (c == '\\') c = '/';
+    }
+
+    const size_t slash = s.find_last_of('/');
+    if (slash != std::string::npos) {
+        s = s.substr(slash + 1);
+    }
+
+    const auto strip_suffix = [&](const char* suffix) {
+        const size_t len = std::strlen(suffix);
+        if (s.size() >= len &&
+            s.compare(s.size() - len, len, suffix) == 0) {
+            s.resize(s.size() - len);
+            return true;
+        }
+        return false;
+    };
+
+    strip_suffix(".dff");
+    strip_suffix(".col");
     return s;
 }
 
@@ -393,7 +421,6 @@ static std::vector<ColModel> g_col_models;
 static std::map<std::string, size_t> g_col_model_by_name;
 static std::vector<std::pair<Vec3, float>> g_col_spheres_world;
 static std::vector<EntityInst> g_insts;
-#include <map>
 
 static Vec3 col_to_vec3(const ColVec3& v) {
     return {v.x, v.y, v.z};
@@ -414,13 +441,21 @@ static void add_collision_box(
         mat4_transform_point(transform, {box.min.x, box.max.y, box.max.z})
     };
 
+    // 6 caras x 2 triángulos. El orden evita duplicar caras y
+    // permite que find_floor() vea correctamente la cara superior.
     const int triangles[12][3] = {
-        {0, 1, 5}, {0, 5, 4},
+        // z = min
+        {0, 3, 2}, {0, 2, 1},
+        // x = max
         {1, 2, 6}, {1, 6, 5},
-        {2, 3, 7}, {2, 7, 6},
-        {3, 0, 4}, {3, 4, 7},
-        {3, 6, 2}, {3, 7, 6},
-        {0, 4, 5}, {0, 5, 1}
+        // z = max
+        {4, 5, 6}, {4, 6, 7},
+        // x = min
+        {0, 4, 7}, {0, 7, 3},
+        // y = max
+        {3, 7, 6}, {3, 6, 2},
+        // y = min
+        {0, 1, 5}, {0, 5, 4}
     };
 
     for (const auto& tri : triangles) {
@@ -429,33 +464,60 @@ static void add_collision_box(
 }
 
 static void rebuild_col_inst_collisions() {
+    g_col_model_by_name.clear();
+    g_col_spheres_world.clear();
+
+    LOGI(
+        "COL inst collisions: preparando %zu instancias contra %zu modelos COL",
+        g_insts.size(),
+        g_col_models.size()
+    );
+
     if (g_col_models.empty() || g_insts.empty()) {
         LOGI("COL inst collisions: no hay modelos COL o instancias");
         return;
     }
 
-    g_col_model_by_name.clear();
     for (size_t i = 0; i < g_col_models.size(); ++i) {
-        g_col_model_by_name[to_lower(g_col_models[i].name)] = i;
+        g_col_model_by_name[normalize_col_name(g_col_models[i].name)] = i;
     }
 
     size_t matched_instances = 0;
     size_t mesh_faces = 0;
     size_t boxes = 0;
     size_t spheres = 0;
+    size_t invalid_faces = 0;
+    std::map<std::string, size_t> unmatched_models;
 
     for (const auto& inst : g_insts) {
-        const auto it = g_col_model_by_name.find(to_lower(inst.model));
-        if (it == g_col_model_by_name.end()) continue;
+        const std::string key = normalize_col_name(inst.model);
+        const auto it = g_col_model_by_name.find(key);
+        if (it == g_col_model_by_name.end()) {
+            ++unmatched_models[inst.model];
+            continue;
+        }
 
         const ColModel& col = g_col_models[it->second];
         const Mat4 transform = mat4_from_pos_quat(inst.pos, inst.rot);
         ++matched_instances;
 
+        if (matched_instances <= 30) {
+            LOGI(
+                "COL MATCH[%zu]: inst=%s model=%s faces=%zu boxes=%zu spheres=%zu",
+                matched_instances,
+                inst.name.c_str(),
+                inst.model.c_str(),
+                col.faces.size(),
+                col.boxes.size(),
+                col.spheres.size()
+            );
+        }
+
         for (const auto& face : col.faces) {
             if (face.a >= col.vertices.size() ||
                 face.b >= col.vertices.size() ||
                 face.c >= col.vertices.size()) {
+                ++invalid_faces;
                 continue;
             }
 
@@ -483,19 +545,31 @@ static void rebuild_col_inst_collisions() {
                 transform, col_to_vec3(sphere.center)
             );
 
-            // INST usa rotación + posición, sin escala.
             g_col_spheres_world.push_back({center, sphere.radius});
             ++spheres;
         }
     }
 
     LOGI(
-        "COL inst collisions: matched=%zu meshFaces=%zu boxes=%zu spheres=%zu",
+        "COL inst collisions: matched=%zu meshFaces=%zu boxes=%zu spheres=%zu invalidFaces=%zu unmatchedModels=%zu",
         matched_instances,
         mesh_faces,
         boxes,
-        spheres
+        spheres,
+        invalid_faces,
+        unmatched_models.size()
     );
+
+    size_t shown_unmatched = 0;
+    for (const auto& pair : unmatched_models) {
+        if (shown_unmatched++ >= 20) break;
+        LOGI(
+            "COL UNMATCHED[%zu]: %s x%zu",
+            shown_unmatched,
+            pair.first.c_str(),
+            pair.second
+        );
+    }
 }
 
 static std::map<std::string, DFFModel> g_models;
