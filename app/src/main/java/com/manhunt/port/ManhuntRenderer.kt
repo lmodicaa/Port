@@ -32,6 +32,14 @@ class ManhuntRenderer(private val assets: AssetManager, private val gamePath: St
     external fun nativeLook(dx: Float, dy: Float)
     external fun nativeJump()
     external fun nativeNextDebugAnimation()
+    external fun nativeSetCashTransform(
+        posX: Float,
+        posY: Float,
+        posZ: Float,
+        rotX: Float,
+        rotY: Float,
+        rotZ: Float
+    )
 
     companion object {
         init { System.loadLibrary("manhunt") }
