@@ -755,6 +755,7 @@ static float g_cam_dist   = 3.0f;
 // La animación nunca modifica g_player_yaw: el giro físico del actor sigue
 // siendo independiente, como en el juego original.
 static int g_turn_anim_request = 0; // -1 izquierda, +1 derecha
+static float g_turn_hold_time = 0.0f;
 
 // Movimiento joystick (actualizados desde Kotlin)
 static float g_move_fwd   = 0.f;  // -1..1  (adelante/atrás)
@@ -4408,6 +4409,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
     // original correspondiente al sentido del giro.
     if (std::fabs(dx) > 0.5f) {
         g_turn_anim_request = (dx > 0.0f) ? 1 : -1;
+        g_turn_hold_time = 0.0f;
     }
 
     // Arrastrar hacia la derecha hace girar la cámara/personaje hacia
