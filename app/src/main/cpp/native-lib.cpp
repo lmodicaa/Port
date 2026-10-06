@@ -2099,33 +2099,20 @@ static void setup_model() {
             dump_cash_debug(cash_model);
             g_model_render["cash"] = rd;
 
-            // Skinning habilitado únicamente para esta fase de
-            // validación en pose base. Si la geometría vuelve a romperse,
-            // el siguiente diagnóstico será exclusivamente el formato de
-            // las matrices inverse-bind.
             const size_t skin_matrix_count =
                 g_cash_model.inverse_bind_matrices.size() / 16;
-            size_t valid_bone_matrix_indices = 0;
-
-            for (const auto& bone : g_cash_model.bones) {
-                if (static_cast<size_t>(bone.matrix_index) <
-                    skin_matrix_count) {
-                    ++valid_bone_matrix_indices;
-                }
-            }
 
             g_cash_skinning_enabled =
                 !g_cash_model.bones.empty() &&
-                skin_matrix_count > 0 &&
-                valid_bone_matrix_indices > 0;
+                skin_matrix_count > 0;
 
             LOGI(
-                "CASH SKINNING: enabled=%s bones=%zu "
-                "skinMatrices=%zu validMatrixIndices=%zu",
+                "CASH SKINNING: enabled=%s frames=%zu "
+                "skinMatrices=%zu skinRemap=%zu",
                 g_cash_skinning_enabled ? "YES" : "NO",
                 g_cash_model.bones.size(),
                 skin_matrix_count,
-                valid_bone_matrix_indices
+                g_cash_model.skin_bone_to_frame.size()
             );
 
             g_cash_y_offset = 0.0f;
@@ -3403,35 +3390,52 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             } else {
                 global_bones[bone_idx] = local_mat;
             }
-            /*
-             * --------------------------------------------------------
-             * Skin matrix
-             * --------------------------------------------------------
-             */
-            if (
-                bone.matrix_index != 0xFFFFFFFF &&
-                bone.matrix_index < 96 &&
-                (
-                    bone.matrix_index * 16 + 15
-                ) < g_cash_model.inverse_bind_matrices.size()
-            ) {
-                Mat4 inverse_bind;
-                for (int j = 0; j < 16; ++j) {
-                    inverse_bind.m[j] = g_cash_model
-                        .inverse_bind_matrices[
-                            static_cast<size_t>(
-                                bone.matrix_index
-                            ) * 16 + j
-                        ];
-                }
-                skin_matrices[
-                    bone.matrix_index
-                ] = mat4_mul(
-                    global_bones[bone_idx],
+        }
+
+        // ------------------------------------------------------------
+        // Construir la palette Skin.
+        //
+        // vertex.bone_indices usa índices LOCALES del Skin plugin.
+        // skin_bone_to_frame convierte esos índices al frame real del
+        // skeleton. La inverse-bind está en el mismo orden local de
+        // Skin, por eso cada entrada se combina con el frame indicado
+        // por la tabla de remapeo.
+        // ------------------------------------------------------------
+        const size_t skin_bone_count =
+            g_cash_model.inverse_bind_matrices.size() / 16;
+
+        for (size_t skin_bone = 0;
+             skin_bone < skin_bone_count &&
+             skin_bone < 96;
+             ++skin_bone) {
+            size_t frame_index = skin_bone;
+
+            if (skin_bone <
+                g_cash_model.skin_bone_to_frame.size()) {
+                frame_index =
+                    g_cash_model.skin_bone_to_frame[skin_bone];
+            }
+
+            if (frame_index >= g_cash_model.bones.size() ||
+                frame_index >= 96) {
+                continue;
+            }
+
+            Mat4 inverse_bind;
+            for (int j = 0; j < 16; ++j) {
+                inverse_bind.m[j] =
+                    g_cash_model.inverse_bind_matrices[
+                        skin_bone * 16 + j
+                    ];
+            }
+
+            skin_matrices[skin_bone] =
+                mat4_mul(
+                    global_bones[frame_index],
                     inverse_bind
                 );
-            }
         }
+
         /*
          * --------------------------------------------------------
          * Render
