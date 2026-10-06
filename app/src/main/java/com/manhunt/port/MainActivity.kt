@@ -136,13 +136,6 @@ class MainActivity : Activity() {
         container.addView(glView, 0)
         
 
-        findViewById<android.widget.Button>(R.id.btn_recenter).setOnClickListener {
-            renderer.nativeRecenterCamera()
-        }
-
-        findViewById<android.widget.Button>(R.id.btn_zoom).setOnClickListener {
-            renderer.nativeCycleZoom()
-        }
 
         val sprintButton = findViewById<android.widget.Button>(R.id.btn_sprint)
         sprintButton.setOnTouchListener { _, event ->
