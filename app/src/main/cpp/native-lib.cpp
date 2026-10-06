@@ -379,8 +379,12 @@ static float g_move_right = 0.f;  // -1..1  (izquierda/derecha)
 static float  g_vel_y    = 0.f;
 static bool   g_on_ground= false;
 static const float GRAVITY        = -20.0f;
-static const float PLAYER_HEIGHT  =  1.8f;
 static const float MOVE_SPEED     = 10.0f;
+
+// La forma de colisión del jugador se obtiene del modelo "player"
+// de collisions.col (2 esferas + 1 línea), como en el juego.
+static const ColModel* g_player_col_model = nullptr;
+static float g_player_collision_height = 2.0f;
 
 // Triángulos del BSP para colisión de suelo
 struct Tri { Vec3 a, b, c; };
@@ -790,111 +794,515 @@ static float find_floor(float px, float search_y, float pz) {
     return best;
 }
 
-static bool hit_wall(float x1, float y1, float z1, float x2, float y2, float z2) {
-    Vec3 ray_o = {x1, y1, z1};
+static Vec3 rotate_player_local(Vec3 p) {
+    const float c = cosf(g_player_yaw);
+    const float s = sinf(g_player_yaw);
 
-    // Esferas de los modelos COL instanciados.
-    const Vec3 segment = {x2 - x1, y2 - y1, z2 - z1};
-    const float segment_len_sq =
-        segment.x * segment.x +
-        segment.y * segment.y +
-        segment.z * segment.z;
+    return {
+        g_player_pos.x + p.x * c + p.z * s,
+        g_player_pos.y + p.y,
+        g_player_pos.z - p.x * s + p.z * c
+    };
+}
 
-    constexpr float PLAYER_COLLISION_RADIUS = 0.30f;
-    for (const auto& sphere : g_col_spheres_world) {
-        float u = 0.0f;
-        if (segment_len_sq > 0.000001f) {
-            u = (
-                (sphere.first.x - x1) * segment.x +
-                (sphere.first.y - y1) * segment.y +
-                (sphere.first.z - z1) * segment.z
-            ) / segment_len_sq;
-            u = std::max(0.0f, std::min(1.0f, u));
-        }
+static float point_triangle_distance_sq(Vec3 p, const Tri& tri) {
+    const Vec3 ab = {
+        tri.b.x - tri.a.x,
+        tri.b.y - tri.a.y,
+        tri.b.z - tri.a.z
+    };
+    const Vec3 ac = {
+        tri.c.x - tri.a.x,
+        tri.c.y - tri.a.y,
+        tri.c.z - tri.a.z
+    };
+    const Vec3 ap = {
+        p.x - tri.a.x,
+        p.y - tri.a.y,
+        p.z - tri.a.z
+    };
 
-        const Vec3 closest = {
-            x1 + segment.x * u,
-            y1 + segment.y * u,
-            z1 + segment.z * u
+    const float d1 = vec3_dot(ab, ap);
+    const float d2 = vec3_dot(ac, ap);
+    if (d1 <= 0.0f && d2 <= 0.0f) {
+        const Vec3 d = {
+            p.x - tri.a.x,
+            p.y - tri.a.y,
+            p.z - tri.a.z
         };
+        return vec3_dot(d, d);
+    }
 
-        const float dx = closest.x - sphere.first.x;
-        const float dy = closest.y - sphere.first.y;
-        const float dz = closest.z - sphere.first.z;
-        const float hit_radius = sphere.second + PLAYER_COLLISION_RADIUS;
+    const Vec3 bp = {
+        p.x - tri.b.x,
+        p.y - tri.b.y,
+        p.z - tri.b.z
+    };
+    const float d3 = vec3_dot(ab, bp);
+    const float d4 = vec3_dot(ac, bp);
+    if (d3 >= 0.0f && d4 <= d3) {
+        const Vec3 d = {
+            p.x - tri.b.x,
+            p.y - tri.b.y,
+            p.z - tri.b.z
+        };
+        return vec3_dot(d, d);
+    }
 
-        if (dx * dx + dy * dy + dz * dz <= hit_radius * hit_radius) {
-            return true;
+    const float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) {
+        const float v = d1 / (d1 - d3);
+        const Vec3 q = {
+            tri.a.x + ab.x * v,
+            tri.a.y + ab.y * v,
+            tri.a.z + ab.z * v
+        };
+        const Vec3 d = {
+            p.x - q.x,
+            p.y - q.y,
+            p.z - q.z
+        };
+        return vec3_dot(d, d);
+    }
+
+    const Vec3 cp = {
+        p.x - tri.c.x,
+        p.y - tri.c.y,
+        p.z - tri.c.z
+    };
+    const float d5 = vec3_dot(ab, cp);
+    const float d6 = vec3_dot(ac, cp);
+    if (d6 >= 0.0f && d5 <= d6) {
+        const Vec3 d = {
+            p.x - tri.c.x,
+            p.y - tri.c.y,
+            p.z - tri.c.z
+        };
+        return vec3_dot(d, d);
+    }
+
+    const float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) {
+        const float w = d2 / (d2 - d6);
+        const Vec3 q = {
+            tri.a.x + ac.x * w,
+            tri.a.y + ac.y * w,
+            tri.a.z + ac.z * w
+        };
+        const Vec3 d = {
+            p.x - q.x,
+            p.y - q.y,
+            p.z - q.z
+        };
+        return vec3_dot(d, d);
+    }
+
+    const float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f) {
+        const Vec3 bc = {
+            tri.c.x - tri.b.x,
+            tri.c.y - tri.b.y,
+            tri.c.z - tri.b.z
+        };
+        const float w = (d4 - d3) /
+                        ((d4 - d3) + (d5 - d6));
+        const Vec3 q = {
+            tri.b.x + bc.x * w,
+            tri.b.y + bc.y * w,
+            tri.b.z + bc.z * w
+        };
+        const Vec3 d = {
+            p.x - q.x,
+            p.y - q.y,
+            p.z - q.z
+        };
+        return vec3_dot(d, d);
+    }
+
+    const Vec3 n = vec3_norm(vec3_cross(ab, ac));
+    const float signed_dist =
+        (p.x - tri.a.x) * n.x +
+        (p.y - tri.a.y) * n.y +
+        (p.z - tri.a.z) * n.z;
+
+    return signed_dist * signed_dist;
+}
+
+static bool segment_intersects_triangle(
+    Vec3 origin,
+    Vec3 direction,
+    const Tri& tri,
+    float& t
+) {
+    const Vec3 e1 = {
+        tri.b.x - tri.a.x,
+        tri.b.y - tri.a.y,
+        tri.b.z - tri.a.z
+    };
+    const Vec3 e2 = {
+        tri.c.x - tri.a.x,
+        tri.c.y - tri.a.y,
+        tri.c.z - tri.a.z
+    };
+
+    const Vec3 h = vec3_cross(direction, e2);
+    const float det = vec3_dot(e1, h);
+    if (fabsf(det) < 1e-6f) return false;
+
+    const float inv_det = 1.0f / det;
+    const Vec3 s = {
+        origin.x - tri.a.x,
+        origin.y - tri.a.y,
+        origin.z - tri.a.z
+    };
+    const float u = vec3_dot(s, h) * inv_det;
+    if (u < 0.0f || u > 1.0f) return false;
+
+    const Vec3 q = vec3_cross(s, e1);
+    const float v = vec3_dot(direction, q) * inv_det;
+    if (v < 0.0f || u + v > 1.0f) return false;
+
+    t = vec3_dot(e2, q) * inv_det;
+    return t >= 0.0f && t <= 1.0f;
+}
+
+static float segment_segment_distance_sq(
+    Vec3 p1,
+    Vec3 q1,
+    Vec3 p2,
+    Vec3 q2
+) {
+    const Vec3 d1 = {
+        q1.x - p1.x,
+        q1.y - p1.y,
+        q1.z - p1.z
+    };
+    const Vec3 d2 = {
+        q2.x - p2.x,
+        q2.y - p2.y,
+        q2.z - p2.z
+    };
+    const Vec3 r = {
+        p1.x - p2.x,
+        p1.y - p2.y,
+        p1.z - p2.z
+    };
+
+    const float a = vec3_dot(d1, d1);
+    const float e = vec3_dot(d2, d2);
+    const float f = vec3_dot(d2, r);
+
+    float s = 0.0f;
+    float t = 0.0f;
+
+    if (a <= 1e-8f && e <= 1e-8f) {
+        const Vec3 d = {
+            p1.x - p2.x,
+            p1.y - p2.y,
+            p1.z - p2.z
+        };
+        return vec3_dot(d, d);
+    }
+
+    if (a <= 1e-8f) {
+        s = 0.0f;
+        t = std::max(0.0f, std::min(1.0f, f / e));
+    } else {
+        const float c = vec3_dot(d1, r);
+        if (e <= 1e-8f) {
+            t = 0.0f;
+            s = std::max(0.0f, std::min(1.0f, -c / a));
+        } else {
+            const float b = vec3_dot(d1, d2);
+            const float denom = a * e - b * b;
+
+            if (denom != 0.0f) {
+                s = std::max(
+                    0.0f,
+                    std::min(1.0f, (b * f - c * e) / denom)
+                );
+            }
+
+            const float tnom = b * s + f;
+            if (tnom < 0.0f) {
+                t = 0.0f;
+                s = std::max(0.0f, std::min(1.0f, -c / a));
+            } else if (tnom > e) {
+                t = 1.0f;
+                s = std::max(
+                    0.0f,
+                    std::min(1.0f, (b - c) / a)
+                );
+            } else {
+                t = tnom / e;
+            }
         }
     }
-    Vec3 ray_d = {x2 - x1, y2 - y1, z2 - z1};
-    const float dist = sqrtf(
-        ray_d.x*ray_d.x +
-        ray_d.y*ray_d.y +
-        ray_d.z*ray_d.z
+
+    const Vec3 c1 = {
+        p1.x + d1.x * s,
+        p1.y + d1.y * s,
+        p1.z + d1.z * s
+    };
+    const Vec3 c2 = {
+        p2.x + d2.x * t,
+        p2.y + d2.y * t,
+        p2.z + d2.z * t
+    };
+    const Vec3 d = {
+        c1.x - c2.x,
+        c1.y - c2.y,
+        c1.z - c2.z
+    };
+    return vec3_dot(d, d);
+}
+
+static float segment_triangle_distance_sq(
+    Vec3 a,
+    Vec3 b,
+    const Tri& tri
+) {
+    const Vec3 direction = {
+        b.x - a.x,
+        b.y - a.y,
+        b.z - a.z
+    };
+
+    float t = 0.0f;
+    if (segment_intersects_triangle(a, direction, tri, t)) {
+        return 0.0f;
+    }
+
+    float best = std::min(
+        point_triangle_distance_sq(a, tri),
+        point_triangle_distance_sq(b, tri)
     );
-    if (dist < 0.001f) return false;
 
-    ray_d.x /= dist;
-    ray_d.y /= dist;
-    ray_d.z /= dist;
+    best = std::min(
+        best,
+        segment_segment_distance_sq(a, b, tri.a, tri.b)
+    );
+    best = std::min(
+        best,
+        segment_segment_distance_sq(a, b, tri.b, tri.c)
+    );
+    best = std::min(
+        best,
+        segment_segment_distance_sq(a, b, tri.c, tri.a)
+    );
 
-    const float inv_cell = 1.0f / g_col_grid.cell_size;
-    const int cx0 = static_cast<int>(std::floor(x1 * inv_cell));
-    const int cz0 = static_cast<int>(std::floor(z1 * inv_cell));
-    const int cx1 = static_cast<int>(std::floor(x2 * inv_cell));
-    const int cz1 = static_cast<int>(std::floor(z2 * inv_cell));
+    return best;
+}
 
-    const int min_cx = std::min(cx0, cx1) - 1;
-    const int max_cx = std::max(cx0, cx1) + 1;
-    const int min_cz = std::min(cz0, cz1) - 1;
-    const int max_cz = std::max(cz0, cz1) + 1;
+static bool player_collision_at(
+    float px,
+    float py,
+    float pz
+) {
+    if (!g_player_col_model) return false;
 
-    for (int cx = min_cx; cx <= max_cx; ++cx) {
-        for (int cz = min_cz; cz <= max_cz; ++cz) {
+    const float yaw_c = cosf(g_player_yaw);
+    const float yaw_s = sinf(g_player_yaw);
+
+    const auto transform_local = [&](ColVec3 local) -> Vec3 {
+        return {
+            px + local.x * yaw_c + local.z * yaw_s,
+            py + local.y,
+            pz - local.x * yaw_s + local.z * yaw_c
+        };
+    };
+
+    // El modelo player tiene la forma física real definida por COL:
+    // esferas + línea central.
+    std::vector<std::pair<Vec3, float>> player_spheres;
+    player_spheres.reserve(g_player_col_model->spheres.size());
+
+    for (const auto& sphere : g_player_col_model->spheres) {
+        player_spheres.push_back({
+            transform_local(sphere.center),
+            sphere.radius
+        });
+    }
+
+    Vec3 line_a{};
+    Vec3 line_b{};
+    bool has_line = false;
+    if (!g_player_col_model->lines.empty()) {
+        line_a = transform_local(
+            ColVec3{
+                g_player_col_model->lines.front().a.x,
+                g_player_col_model->lines.front().a.y,
+                g_player_col_model->lines.front().a.z
+            }
+        );
+        line_b = transform_local(
+            ColVec3{
+                g_player_col_model->lines.front().b.x,
+                g_player_col_model->lines.front().b.y,
+                g_player_col_model->lines.front().b.z
+            }
+        );
+        has_line = true;
+    }
+
+    const int center_cx =
+        static_cast<int>(std::floor(px / g_col_grid.cell_size));
+    const int center_cz =
+        static_cast<int>(std::floor(pz / g_col_grid.cell_size));
+
+    // El radio máximo real del modelo player amplía la búsqueda a
+    // las celdas donde puede tocar una pared.
+    float max_radius = 0.0f;
+    for (const auto& sphere : player_spheres) {
+        max_radius = std::max(max_radius, sphere.second);
+    }
+
+    const int cell_radius =
+        std::max(1, static_cast<int>(
+            std::ceil((max_radius + 0.25f) /
+                      g_col_grid.cell_size)
+        ));
+
+    for (int cx = center_cx - cell_radius;
+         cx <= center_cx + cell_radius;
+         ++cx) {
+        for (int cz = center_cz - cell_radius;
+             cz <= center_cz + cell_radius;
+             ++cz) {
             const auto it = g_col_grid.cells.find({cx, cz});
             if (it == g_col_grid.cells.end()) continue;
 
             for (const auto& tri : it->second) {
-                Vec3 e1 = {tri.b.x-tri.a.x, tri.b.y-tri.a.y, tri.b.z-tri.a.z};
-                Vec3 e2 = {tri.c.x-tri.a.x, tri.c.y-tri.a.y, tri.c.z-tri.a.z};
-
+                const Vec3 e1 = {
+                    tri.b.x - tri.a.x,
+                    tri.b.y - tri.a.y,
+                    tri.b.z - tri.a.z
+                };
+                const Vec3 e2 = {
+                    tri.c.x - tri.a.x,
+                    tri.c.y - tri.a.y,
+                    tri.c.z - tri.a.z
+                };
                 Vec3 n = vec3_cross(e1, e2);
-                const float nlen = sqrtf(n.x*n.x + n.y*n.y + n.z*n.z);
-                if (nlen > 0.0f) {
-                    n.x/=nlen;
-                    n.y/=nlen;
-                    n.z/=nlen;
+                const float nlen = sqrtf(
+                    n.x*n.x + n.y*n.y + n.z*n.z
+                );
+                if (nlen < 1e-6f) continue;
+
+                n.x /= nlen;
+                n.y /= nlen;
+                n.z /= nlen;
+
+                // Para el desplazamiento horizontal, las superficies
+                // horizontales no deben frenar al jugador.
+                if (fabsf(n.y) > 0.70f) continue;
+
+                for (const auto& sphere : player_spheres) {
+                    if (point_triangle_distance_sq(
+                            sphere.first,
+                            tri
+                        ) <= sphere.second * sphere.second) {
+                        return true;
+                    }
                 }
 
-                if (fabsf(n.y) > 0.7f) continue;
+                if (has_line) {
+                    const float radius =
+                        std::max(0.01f, max_radius);
 
-                Vec3 h = vec3_cross(ray_d, e2);
-                const float det = vec3_dot(e1, h);
-                if (fabsf(det) < 1e-6f) continue;
-
-                const float inv_det = 1.0f / det;
-                Vec3 s = {
-                    ray_o.x-tri.a.x,
-                    ray_o.y-tri.a.y,
-                    ray_o.z-tri.a.z
-                };
-
-                const float u = vec3_dot(s, h) * inv_det;
-                if (u < 0.0f || u > 1.0f) continue;
-
-                Vec3 q = vec3_cross(s, e1);
-                const float v = vec3_dot(ray_d, q) * inv_det;
-                if (v < 0.0f || u + v > 1.0f) continue;
-
-                const float t = vec3_dot(e2, q) * inv_det;
-                if (t > 0.0f && t < dist + 0.15f) {
-                    return true;
+                    if (segment_triangle_distance_sq(
+                            line_a,
+                            line_b,
+                            tri
+                        ) <= radius * radius) {
+                        return true;
+                    }
                 }
             }
         }
     }
 
+    // Esferas de colisión de objetos.
+    for (const auto& object_sphere : g_col_spheres_world) {
+        float best_sq = 1e30f;
+
+        for (const auto& player_sphere : player_spheres) {
+            const Vec3 d = {
+                player_sphere.first.x - object_sphere.first.x,
+                player_sphere.first.y - object_sphere.first.y,
+                player_sphere.first.z - object_sphere.first.z
+            };
+            const float radius =
+                player_sphere.second + object_sphere.second;
+
+            best_sq = std::min(
+                best_sq,
+                vec3_dot(d, d) - radius * radius
+            );
+        }
+
+        if (has_line) {
+            // Distancia de la línea central del jugador a la esfera.
+            const Vec3 seg = {
+                line_b.x - line_a.x,
+                line_b.y - line_a.y,
+                line_b.z - line_a.z
+            };
+            const float len_sq = vec3_dot(seg, seg);
+            float u = 0.0f;
+            if (len_sq > 1e-8f) {
+                const Vec3 to_sphere = {
+                    object_sphere.first.x - line_a.x,
+                    object_sphere.first.y - line_a.y,
+                    object_sphere.first.z - line_a.z
+                };
+                u = vec3_dot(to_sphere, seg) / len_sq;
+                u = std::max(0.0f, std::min(1.0f, u));
+            }
+
+            const Vec3 closest = {
+                line_a.x + seg.x * u,
+                line_a.y + seg.y * u,
+                line_a.z + seg.z * u
+            };
+            const Vec3 d = {
+                closest.x - object_sphere.first.x,
+                closest.y - object_sphere.first.y,
+                closest.z - object_sphere.first.z
+            };
+            const float radius = max_radius + object_sphere.second;
+
+            best_sq = std::min(
+                best_sq,
+                vec3_dot(d, d) - radius * radius
+            );
+        }
+
+        if (best_sq <= 0.0f) return true;
+    }
+
+    return false;
+}
+
+static bool hit_wall(
+    float,
+    float,
+    float,
+    float x2,
+    float y2,
+    float z2
+) {
+    // La prueba se hace sobre la forma de colisión real del jugador
+    // en la posición de destino. El resolvedor de movimiento de abajo
+    // conserva el deslizamiento por X/Z.
+    if (g_player_col_model) {
+        if (player_collision_at(x2, y2 - 1.0f, z2)) {
+            return true;
+        }
+        return false;
+    }
+
+    // Fallback únicamente si el modelo player del COL no está disponible.
     return false;
 }
 
@@ -1089,6 +1497,61 @@ static void setup_model() {
     auto col_raw = read_asset("levels/asylum/collisions.col");
     if (!col_raw.empty()) {
         g_col_models = col_load_all(col_raw.data(), col_raw.size());
+
+        g_player_col_model = nullptr;
+        for (const auto& model : g_col_models) {
+            if (normalize_col_name(model.name) == "player") {
+                g_player_col_model = &model;
+                break;
+            }
+        }
+
+        if (g_player_col_model) {
+            g_player_collision_height =
+                std::max(
+                    0.1f,
+                    g_player_col_model->max.y -
+                    g_player_col_model->min.y
+                );
+
+            LOGI(
+                "PLAYER COL: spheres=%zu lines=%zu height=%.3f boundsY=(%.3f,%.3f)",
+                g_player_col_model->spheres.size(),
+                g_player_col_model->lines.size(),
+                g_player_collision_height,
+                g_player_col_model->min.y,
+                g_player_col_model->max.y
+            );
+
+            for (size_t i = 0; i < g_player_col_model->spheres.size(); ++i) {
+                const auto& sphere = g_player_col_model->spheres[i];
+                LOGI(
+                    "PLAYER COL SPHERE[%zu]: center=(%.3f,%.3f,%.3f) radius=%.3f",
+                    i,
+                    sphere.center.x,
+                    sphere.center.y,
+                    sphere.center.z,
+                    sphere.radius
+                );
+            }
+
+            for (size_t i = 0; i < g_player_col_model->lines.size(); ++i) {
+                const auto& line = g_player_col_model->lines[i];
+                LOGI(
+                    "PLAYER COL LINE[%zu]: A=(%.3f,%.3f,%.3f) B=(%.3f,%.3f,%.3f)",
+                    i,
+                    line.a.x,
+                    line.a.y,
+                    line.a.z,
+                    line.b.x,
+                    line.b.y,
+                    line.b.z
+                );
+            }
+        } else {
+            LOGE("PLAYER COL: modelo 'player' no encontrado");
+        }
+
         g_col_spheres_world.clear();
         rebuild_col_inst_collisions();
     } else {
