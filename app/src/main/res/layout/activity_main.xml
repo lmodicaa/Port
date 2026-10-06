@@ -25,6 +25,22 @@
         android:layout_marginEnd="64dp">
 
         <Button
+            android:id="@+id/btn_sprint"
+            android:layout_width="80dp"
+            android:layout_height="64dp"
+            android:text="Sprint"
+            android:background="#80000000"
+            android:textColor="#FFFFFF" />
+
+        <Button
+            android:id="@+id/btn_sneak"
+            android:layout_width="80dp"
+            android:layout_height="64dp"
+            android:text="Sneak"
+            android:background="#80000000"
+            android:textColor="#FFFFFF" />
+
+        <Button
             android:id="@+id/btn_jump"
             android:layout_width="80dp"
             android:layout_height="80dp"
