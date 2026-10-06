@@ -757,6 +757,10 @@ static float g_cam_dist   = 3.0f;
 static int g_turn_anim_request = 0; // -1 izquierda, +1 derecha
 // Sentido del último arrastre horizontal continuo.
 static int g_turn_input_sign = 0;
+// Una sola animación de giro por gesto continuo. El movimiento del dedo
+// puede tener pequeñas inversiones de signo por jitter y no debe encadenar
+// nuevas animaciones mientras el mismo gesto siga activo.
+static bool g_turn_gesture_consumed = false;
 // Animación de giro actualmente en reproducción. Se deja terminar aunque
 // el dedo siga apoyado, tal como una animación de transición no-loop.
 static int g_turn_anim_active = 0; // -1 izquierda, +1 derecha
@@ -4429,13 +4433,18 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
     if (std::fabs(dx) > 0.5f) {
         const int turn_sign = (dx > 0.0f) ? 1 : -1;
 
-        if (turn_sign != g_turn_input_sign) {
+        // Sólo el primer movimiento horizontal del gesto dispara la
+        // animación. Los siguientes eventos mantienen el giro físico,
+        // pero no vuelven a iniciar Stand_Turn_* cuando termina.
+        if (!g_turn_gesture_consumed) {
             g_turn_anim_request = turn_sign;
             g_turn_input_sign = turn_sign;
+            g_turn_gesture_consumed = true;
         }
     } else if (dx == 0.0f && dy == 0.0f) {
         // Android usa este par cero como fin del gesto derecho.
         g_turn_input_sign = 0;
+        g_turn_gesture_consumed = false;
     }
 
     // Arrastrar hacia la derecha hace girar la cámara/personaje hacia
