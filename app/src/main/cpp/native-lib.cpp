@@ -3157,6 +3157,15 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             root_delta_local.x * root_delta_local.x +
             root_delta_local.z * root_delta_local.z
         );
+
+        // Mantener los multiplicadores originales de EntityTypeData.
+        if (g_sneak_pressed) {
+            root_distance *= g_player_control.sneak_walk_speed;
+        } else if (g_sprint_pressed) {
+            root_distance *= g_player_control.sprint_speed;
+        } else {
+            root_distance *= g_player_control.walk_speed;
+        }
     }
 
     const float movement_speed =
