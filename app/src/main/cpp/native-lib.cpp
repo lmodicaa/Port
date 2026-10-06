@@ -3437,22 +3437,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         scaled_root_distance *= g_player_control.walk_speed;
     }
 
-    const bool special_motion_active =
-        g_locomotion_special_anim != nullptr;
-
-    const float target_movement_speed =
-        scaled_root_distance > 0.0001f
-            ? scaled_root_distance / std::max(dt, 0.0001f)
-            : 0.0f;
-
-    // Durante un skid o una transición de arranque no siempre hay una
-    // entrada nueva que deba definir la dirección. En reposo completo no
-    // aplicamos root-motion: Cash no puede avanzar solo.
-    const Vec3 target_movement_dir =
-        currently_moving ? vel_xz :
-        (special_motion_active ? g_last_move_dir :
-                                 Vec3{0.0f, 0.0f, 0.0f});
-
     // El desplazamiento horizontal sale directamente del root-motion del IFP.
     // No aplicamos un filtro físico adicional: MOVE_TRANS_SPEED (0.20 s) del
     // juego original controla la transición visual entre animaciones, no una
