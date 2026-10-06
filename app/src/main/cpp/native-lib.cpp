@@ -13,6 +13,7 @@
 #include <fstream>
 #include <algorithm>
 #include <dirent.h>
+#include <ctime>
 #include "txd_loader.h"
 #include "dff_loader.h"
 #include "inst_loader.h"
@@ -148,6 +149,9 @@ static std::map<std::string, Animation> g_anims;
 // >=0 = índice dentro de g_debug_anim_list
 static int g_debug_anim_idx = -2;
 static std::vector<const Animation*> g_debug_anim_list;
+
+// Forward declaration: setup_model() may use this diagnostic helper.
+static void dump_cash_debug(const DFFModel& model);
 
 static std::string to_lower(std::string s) {
     for (char& c : s) c = tolower((unsigned char)c);
@@ -599,7 +603,7 @@ static bool hit_wall(float x1, float y1, float z1, float x2, float y2, float z2)
     }
 
     return false;
-
+}
 
 static void load_txd_to_gpu(const char* path) {
     auto txd_raw = read_asset(path);
