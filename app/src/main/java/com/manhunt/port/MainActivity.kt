@@ -121,7 +121,7 @@ class MainActivity : Activity() {
         }
         
         findViewById<android.widget.Button>(R.id.btn_action).setOnClickListener {
-            // Futura acción
+            renderer.nativeNextDebugAnimation()
         }
     }
 
