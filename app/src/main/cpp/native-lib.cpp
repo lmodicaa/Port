@@ -645,6 +645,7 @@ static void rebuild_col_inst_collisions() {
     size_t missing_model_fallback_col = 0;
     std::map<std::string, size_t> unmatched_models;
     std::map<std::string, size_t> unmatched_type_data;
+    std::map<std::string, size_t> unmatched_fallback_classes;
 
     for (const auto& inst : g_insts) {
         const std::string record_name =
@@ -671,6 +672,11 @@ static void rebuild_col_inst_collisions() {
                 ++unmatched_type_data[collision_name];
             } else {
                 ++missing_model_fallback_col;
+                ++unmatched_fallback_classes[
+                    inst.entity_class.empty()
+                        ? "<empty>"
+                        : inst.entity_class
+                ];
             }
             ++unmatched_models[collision_name];
             continue;
@@ -792,6 +798,17 @@ static void rebuild_col_inst_collisions() {
         LOGI(
             "COL TYPE-DATA-MISSING[%zu]: collision=%s x%zu",
             shown_type_unmatched,
+            pair.first.c_str(),
+            pair.second
+        );
+    }
+
+    size_t shown_fallback_classes = 0;
+    for (const auto& pair : unmatched_fallback_classes) {
+        if (shown_fallback_classes++ >= 20) break;
+        LOGI(
+            "COL FALLBACK-NO-DATA CLASS[%zu]: class=%s x%zu",
+            shown_fallback_classes,
             pair.first.c_str(),
             pair.second
         );
