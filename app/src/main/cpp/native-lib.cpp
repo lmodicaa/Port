@@ -147,6 +147,40 @@ static Vec3 mat4_transform_point(const Mat4& m, Vec3 p) {
     };
 }
 
+static Mat4 mat4_inverse_rigid(const Mat4& m) {
+    Mat4 r = mat4_identity();
+
+    r.m[0] = m.m[0];
+    r.m[1] = m.m[4];
+    r.m[2] = m.m[8];
+
+    r.m[4] = m.m[1];
+    r.m[5] = m.m[5];
+    r.m[6] = m.m[9];
+
+    r.m[8] = m.m[2];
+    r.m[9] = m.m[6];
+    r.m[10] = m.m[10];
+
+    r.m[12] = -(
+        r.m[0] * m.m[12] +
+        r.m[4] * m.m[13] +
+        r.m[8] * m.m[14]
+    );
+    r.m[13] = -(
+        r.m[1] * m.m[12] +
+        r.m[5] * m.m[13] +
+        r.m[9] * m.m[14]
+    );
+    r.m[14] = -(
+        r.m[2] * m.m[12] +
+        r.m[6] * m.m[13] +
+        r.m[10] * m.m[14]
+    );
+
+    return r;
+}
+
 static Mat4 mat4_look_at(Vec3 eye, Vec3 center, Vec3 up) {
     Vec3 f = {center.x - eye.x, center.y - eye.y, center.z - eye.z};
     float flen = sqrtf(f.x*f.x + f.y*f.y + f.z*f.z);
@@ -198,6 +232,7 @@ static bool g_cash_skinning_enabled = false;
 // bit 2: usar skin_bone_to_frame
 // bit 3: transponer inverse-bind
 // bit 4: multiplicar inverse-bind * globalBone
+// bit 5: aplicar inverse del Frame del Atomic
 static int g_cash_skin_convention = -1;
 
 // Convención seleccionada automáticamente al validar la pose base.
