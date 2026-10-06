@@ -625,101 +625,6 @@ static Mat4 mat4_rotate_z(float angle) {
 static DFFModel g_cash_model;
 static float g_player_yaw = 0.0f;
 static float g_anim_time = 0.f;
-static float animation_root_motion_speed(const Animation* anim) {
-    if (!anim || anim->duration <= 0.0001f) return 0.0f;
-
-    // HAnim del Player usa el nodo raíz 1000. Su traslación se mantiene
-    // fuera del esqueleto visual y representa el desplazamiento del actor.
-    for (const auto& track : anim->tracks) {
-        if (track.bone_id != 1000 ||
-            track.keyframes.size() < 2 ||
-            (track.frame_type != 2 && track.frame_type != 3)) {
-            continue;
-        }
-
-        const auto& first = track.keyframes.front();
-        const auto& last  = track.keyframes.back();
-        const float dx = last.tx - first.tx;
-        const float dz = last.tz - first.tz;
-        const float distance = sqrtf(dx * dx + dz * dz);
-
-        if (distance > 0.0001f) {
-            return distance / anim->duration;
-        }
-    }
-
-    return 0.0f;
-}
-
-static bool is_looping_locomotion_animation(const Animation* anim) {
-    if (!anim) return false;
-    if (g_debug_anim_idx == -2) return true;
-
-    const std::string& n = anim->name;
-    return n == "Stand_Idle" ||
-           n == "Walk_Fwd" || n == "Walk_Bkw" ||
-           n == "Walk_Left" || n == "Walk_Right" ||
-           n == "Run_Fwd" || n == "Run_Bkw" ||
-           n == "Run_Left" || n == "Run_Right" ||
-           n == "Sneak_Walk_Fwd" || n == "Sneak_Walk_Bkw" ||
-           n == "Sneak_Walk_Left" || n == "Sneak_Walk_Right" ||
-           n == "Sprint_Fwd" || n == "Sprint_Bkw" ||
-           n == "Sprint_Left" || n == "Sprint_Right";
-}
-
-static float locomotion_root_motion_speed(
-    float animation_input,
-    Vec3 vel_xz
-) {
-    if (animation_input <= 0.01f) return 0.0f;
-
-    auto find_anim = [&](const char* wanted) -> const Animation* {
-        const std::string query = to_lower(wanted);
-        for (const auto& pair : g_anims) {
-            if (to_lower(pair.first) == query) {
-                return &pair.second;
-            }
-        }
-        return nullptr;
-    };
-
-    const float player_cy = cosf(g_player_yaw);
-    const float player_sy = sinf(g_player_yaw);
-    const Vec3 player_fwd = {-player_sy, 0.0f, -player_cy};
-    const Vec3 player_right = {player_cy, 0.0f, -player_sy};
-
-    const float local_fwd =
-        vel_xz.x * player_fwd.x + vel_xz.z * player_fwd.z;
-    const float local_right =
-        vel_xz.x * player_right.x + vel_xz.z * player_right.z;
-
-    const bool use_forward_axis =
-        std::fabs(local_fwd) >= std::fabs(local_right);
-
-    const char* direction =
-        use_forward_axis
-            ? (local_fwd >= 0.0f ? "Fwd" : "Bkw")
-            : (local_right >= 0.0f ? "Right" : "Left");
-
-    const char* family = nullptr;
-    if (animation_input >=
-        std::max(g_player_control.move_run_threshold,
-                 g_player_control.run_threshold)) {
-        family = "Run_";
-    } else if (animation_input >= g_player_control.move_walk_threshold) {
-        family = "Walk_";
-    } else {
-        family = "Sneak_Walk_";
-    }
-
-    const std::string wanted =
-        std::string(family) + direction;
-
-    return animation_root_motion_speed(
-        find_anim(wanted.c_str())
-    );
-}
-
 static std::string g_last_played_anim;
 static const Animation* g_current_anim = nullptr;
 static const Animation* g_previous_anim = nullptr;
@@ -827,6 +732,102 @@ struct PlayerControlConfig {
 };
 
 static PlayerControlConfig g_player_control;
+
+static float animation_root_motion_speed(const Animation* anim) {
+    if (!anim || anim->duration <= 0.0001f) return 0.0f;
+
+    // HAnim del Player usa el nodo raíz 1000. Su traslación se mantiene
+    // fuera del esqueleto visual y representa el desplazamiento del actor.
+    for (const auto& track : anim->tracks) {
+        if (track.bone_id != 1000 ||
+            track.keyframes.size() < 2 ||
+            (track.frame_type != 2 && track.frame_type != 3)) {
+            continue;
+        }
+
+        const auto& first = track.keyframes.front();
+        const auto& last  = track.keyframes.back();
+        const float dx = last.tx - first.tx;
+        const float dz = last.tz - first.tz;
+        const float distance = sqrtf(dx * dx + dz * dz);
+
+        if (distance > 0.0001f) {
+            return distance / anim->duration;
+        }
+    }
+
+    return 0.0f;
+}
+
+static bool is_looping_locomotion_animation(const Animation* anim) {
+    if (!anim) return false;
+    if (g_debug_anim_idx == -2) return true;
+
+    const std::string& n = anim->name;
+    return n == "Stand_Idle" ||
+           n == "Walk_Fwd" || n == "Walk_Bkw" ||
+           n == "Walk_Left" || n == "Walk_Right" ||
+           n == "Run_Fwd" || n == "Run_Bkw" ||
+           n == "Run_Left" || n == "Run_Right" ||
+           n == "Sneak_Walk_Fwd" || n == "Sneak_Walk_Bkw" ||
+           n == "Sneak_Walk_Left" || n == "Sneak_Walk_Right" ||
+           n == "Sprint_Fwd" || n == "Sprint_Bkw" ||
+           n == "Sprint_Left" || n == "Sprint_Right";
+}
+
+static float locomotion_root_motion_speed(
+    float animation_input,
+    Vec3 vel_xz
+) {
+    if (animation_input <= 0.01f) return 0.0f;
+
+    auto find_anim = [&](const char* wanted) -> const Animation* {
+        const std::string query = to_lower(wanted);
+        for (const auto& pair : g_anims) {
+            if (to_lower(pair.first) == query) {
+                return &pair.second;
+            }
+        }
+        return nullptr;
+    };
+
+    const float player_cy = cosf(g_player_yaw);
+    const float player_sy = sinf(g_player_yaw);
+    const Vec3 player_fwd = {-player_sy, 0.0f, -player_cy};
+    const Vec3 player_right = {player_cy, 0.0f, -player_sy};
+
+    const float local_fwd =
+        vel_xz.x * player_fwd.x + vel_xz.z * player_fwd.z;
+    const float local_right =
+        vel_xz.x * player_right.x + vel_xz.z * player_right.z;
+
+    const bool use_forward_axis =
+        std::fabs(local_fwd) >= std::fabs(local_right);
+
+    const char* direction =
+        use_forward_axis
+            ? (local_fwd >= 0.0f ? "Fwd" : "Bkw")
+            : (local_right >= 0.0f ? "Right" : "Left");
+
+    const char* family = nullptr;
+    if (animation_input >=
+        std::max(g_player_control.move_run_threshold,
+                 g_player_control.run_threshold)) {
+        family = "Run_";
+    } else if (animation_input >= g_player_control.move_walk_threshold) {
+        family = "Walk_";
+    } else {
+        family = "Sneak_Walk_";
+    }
+
+    const std::string wanted =
+        std::string(family) + direction;
+
+    return animation_root_motion_speed(
+        find_anim(wanted.c_str())
+    );
+}
+
 
 static Vec3 col_to_vec3(const ColVec3& v) {
     return {v.x, v.y, v.z};
