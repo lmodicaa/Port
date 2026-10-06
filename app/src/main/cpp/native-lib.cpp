@@ -3326,6 +3326,24 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     const bool currently_moving = input_strength > 0.01f;
 
     if (currently_moving) {
+        // Si veníamos de un frenado y volvimos a movernos antes de que
+        // terminara el skid, el skid deja de ser válido inmediatamente.
+        // De lo contrario Cash puede seguir usando el root-motion/pose
+        // de frenada mientras el stick ya está pidiendo caminar.
+        if (g_locomotion_special_anim) {
+            const std::string special_name =
+                to_lower(g_locomotion_special_anim->name);
+
+            if (special_name.find("skid") != std::string::npos) {
+                LOGI(
+                    "LOCOMOTION SKID CANCEL: %s -> movement resumed",
+                    g_locomotion_special_anim->name.c_str()
+                );
+                g_locomotion_special_anim = nullptr;
+                g_anim_time = 0.0f;
+            }
+        }
+
         const float dir_len = sqrtf(
             vel_xz.x * vel_xz.x +
             vel_xz.z * vel_xz.z
