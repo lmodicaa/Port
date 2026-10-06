@@ -3363,15 +3363,16 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
          * Debug de animación
          * --------------------------------------------------------
          */
-        static bool logged_animation = false;
-        if (!logged_animation && anim) {
+        // Registrar cada cambio real de locomoción para comprobar
+        // que las zonas del stick están entrando en la animación correcta.
+        if (anim && anim != g_current_anim) {
             LOGI(
-                "ANIM PLAY: %s duration=%.3f tracks=%zu",
+                "ANIM CHANGE: %s duration=%.3f tracks=%zu input=%.3f",
                 anim->name.c_str(),
                 anim->duration,
-                anim->tracks.size()
+                anim->tracks.size(),
+                input_strength
             );
-            logged_animation = true;
         }
         /*
          * --------------------------------------------------------
