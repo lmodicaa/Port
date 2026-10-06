@@ -3428,9 +3428,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
 
     const float effective_pitch = g_cam_pitch + g_cam_stair_pitch;
 
-    // ZOOM_LEVELS son factores de magnificación. Mantener la distancia
-    // física de la cámara evita clipping del personaje; el acercamiento
-    // se consigue estrechando el FOV como una cámara óptica.
     Vec3 cam_pos;
     cam_pos.x =
         g_player_pos.x +
