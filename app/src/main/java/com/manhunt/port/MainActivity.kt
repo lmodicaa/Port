@@ -211,13 +211,13 @@ class MainActivity : Activity() {
 
         copy.setOnClickListener {
             val values =
-                "Pos X=\${"%.2f".format(posX)}, " +
-                "Pos Y=\${"%.2f".format(posY)}, " +
-                "Pos Z=\${"%.2f".format(posZ)}, " +
-                "Rot X=\${"%.0f".format(rotX)}°, " +
-                "Rot Y=\${"%.0f".format(rotY)}°, " +
-                "Rot Z=\${"%.0f".format(rotZ)}°"
-
+            val values =
+                "Pos X=${"%.2f".format(posX)}, " +
+                "Pos Y=${"%.2f".format(posY)}, " +
+                "Pos Z=${"%.2f".format(posZ)}, " +
+                "Rot X=${"%.0f".format(rotX)}°, " +
+                "Rot Y=${"%.0f".format(rotY)}°, " +
+                "Rot Z=${"%.0f".format(rotZ)}°"
             val clipboard =
                 getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(
