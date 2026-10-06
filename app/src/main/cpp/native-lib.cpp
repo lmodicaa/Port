@@ -1493,15 +1493,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             mat4_rotate_x(rx)
         );
 
-        const Mat4 translation_only = [&]() {
-            Mat4 t = mat4_identity();
-            t.m[12] = center_pos.x;
-            t.m[13] = center_pos.y;
-            t.m[14] = center_pos.z;
-            return t;
-        }();
-
-        (void)translation_only;
         cash_model_m = mat4_mul(cash_model_m, extra_rot);
         Mat4 cash_mvp = mat4_mul(
             vp,
