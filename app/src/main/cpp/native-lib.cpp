@@ -106,9 +106,6 @@ static Mat4 mat4_from_pos_yaw(Vec3 pos, float yaw) {
     return r;
 }
 
-
-static DFFModel g_cash_model;
-
 static Mat4 mat4_from_pos_cash(Vec3 pos, float yaw) {
     // Baseline established during visual calibration:
     // Cash needs a Z-up -> Y-up axis conversion plus the runtime yaw.
@@ -292,14 +289,13 @@ static int    g_height            = 0;
 
 // Estado 3ra Persona
 static Vec3  g_player_pos = {0.f, -5.f, 0.f};
-// El offset vertical del modelo se calcula automáticamente contra el suelo.
-static float g_cash_y_offset = 0.0f;
+static float g_cash_y_offset = 1.0f;
 
 // El modelo Cash usa un eje frontal distinto al del runtime:
 // el frente del DFF debe girarse 90 grados para alinearlo con
 // el forward del jugador (-Z en yaw=0).
 static constexpr float CASH_MODEL_YAW_OFFSET = -1.57079632679f;
-static Vec3 g_cash_pos_adjust = {0.0f, 1.02f, 0.0f};
+static Vec3 g_cash_pos_adjust = {0.0f, 1.0f, 0.0f};
 static Vec3 g_cash_rot_adjust_deg = {0.0f, -91.0f, 180.0f};
 
 static Mat4 mat4_rotate_x(float angle) {
@@ -331,6 +327,7 @@ static Mat4 mat4_rotate_z(float angle) {
     r.m[5] = c;
     return r;
 }
+static DFFModel g_cash_model;
 static float g_player_yaw = 0.0f;
 static float g_anim_time = 0.f;
 static float g_cam_yaw    = 0.0f;
@@ -469,8 +466,10 @@ void main() {
     vec4 pos = u_mvp * local_pos;
     gl_Position = pos;
     v_uv = a_uv;
-    v_color = a_color;    v_dist = pos.w;
-    v_normal = normalize(mat3(u_model) * local_normal);})";
+    v_color = a_color;
+    v_dist = pos.w;
+    v_normal = normalize(mat3(u_model) * local_normal);
+})";
 
 // Fragment: texturas + colores de vértices + niebla negra (Manhunt style)
 static const char* FRAG_SRC = R"(#version 300 es
@@ -498,6 +497,7 @@ void main() {
     if (u_has_tex == 1) {
         tex_color = texture(u_tex, v_uv);
     }
+
     // Render estable: no usar todavía los datos de iluminación del BSP,
     // porque el parser del RW_WORLD aún no está verificado.
     vec4 base = tex_color * v_color;
@@ -907,7 +907,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     // deformar el modelo al iniciar la aplicación.
     g_debug_anim_idx = -1;
     g_cash_skinning_enabled = false;
-    g_cash_pos_adjust = {0.0f, 1.02f, 0.0f};
+    g_cash_pos_adjust = {0.0f, 1.0f, 0.0f};
     g_cash_rot_adjust_deg = {0.0f, -91.0f, 180.0f};
 }
 
@@ -968,7 +968,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
 
     if (hit_wall(g_player_pos.x, waist_y, g_player_pos.z, nx, waist_y, nz)) {
         if (!hit_wall(g_player_pos.x, waist_y, g_player_pos.z, nx, waist_y, g_player_pos.z)) {
-            g_player_pos.x = nx;        } else if (!hit_wall(g_player_pos.x, waist_y, g_player_pos.z, g_player_pos.x, waist_y, nz)) {            g_player_pos.z = nz;
+            g_player_pos.x = nx;
+        } else if (!hit_wall(g_player_pos.x, waist_y, g_player_pos.z, g_player_pos.x, waist_y, nz)) {
+            g_player_pos.z = nz;
         }
     } else {
         g_player_pos.x = nx;
@@ -995,7 +997,8 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     cam_pos.z = g_player_pos.z + cosf(g_cam_yaw) * cosf(g_cam_pitch) * g_cam_dist;
     Vec3 target = {g_player_pos.x, g_player_pos.y + 1.5f, g_player_pos.z};
 
-    // ── Render ────────────────────────────────────────────────────────────    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    // ── Render ────────────────────────────────────────────────────────────
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (!g_program || !g_vao || g_groups.empty()) return;
 
     float aspect = g_height > 0 ? (float)g_width / (float)g_height : 1.f;
@@ -1467,19 +1470,21 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
          * Render
          * --------------------------------------------------------
          */
-        // Transformación calibrada de Cash. Los valores de orientación vienen
-        // del ajuste visual realizado con el modelo original.
-        const Vec3 center_pos = {
-            g_player_pos.x + g_cash_pos_adjust.x,
-            g_player_pos.y + g_cash_y_offset + g_cash_pos_adjust.y,
-            g_player_pos.z + g_cash_pos_adjust.z
-        };
-
+        Vec3 center_pos = vec3_add(
+            g_player_pos,
+            {
+                g_cash_pos_adjust.x,
+                g_cash_y_offset + g_cash_pos_adjust.y,
+                g_cash_pos_adjust.z
+            }
+        );
         Mat4 cash_model_m = mat4_from_pos_cash(
             center_pos,
             g_player_yaw + CASH_MODEL_YAW_OFFSET
         );
 
+        // Temporary visual-calibration rotation, applied after the
+        // established baseline transform so the menu can tune local axes.
         const float rx = g_cash_rot_adjust_deg.x * 0.017453292519943f;
         const float ry = g_cash_rot_adjust_deg.y * 0.017453292519943f;
         const float rz = g_cash_rot_adjust_deg.z * 0.017453292519943f;
@@ -1488,14 +1493,12 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             mat4_rotate_x(rx)
         );
 
-        cash_model_m = mat4_mul(
-            cash_model_m,
-            extra_rot
-        );
+        cash_model_m = mat4_mul(cash_model_m, extra_rot);
         Mat4 cash_mvp = mat4_mul(
             vp,
             cash_model_m
-        );        glUniformMatrix4fv(
+        );
+        glUniformMatrix4fv(
             loc_mvp,
             1,
             GL_FALSE,
