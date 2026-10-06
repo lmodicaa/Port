@@ -944,9 +944,22 @@ static float locomotion_root_motion_speed(
     const std::string wanted =
         std::string(family) + direction;
 
-    return animation_root_motion_speed(
+    const float base_speed = animation_root_motion_speed(
         find_anim(wanted.c_str())
     );
+
+    // Los *_SPEED del entityTypeData son multiplicadores del movimiento
+    // original de la animación. La mayoría valen 1.0; Sneak_Walk es 1.2.
+    float speed_multiplier = 1.0f;
+    if (family == std::string("Sneak_Walk_")) {
+        speed_multiplier = g_player_control.sneak_walk_speed;
+    } else if (family == std::string("Walk_")) {
+        speed_multiplier = g_player_control.walk_speed;
+    } else if (family == std::string("Run_")) {
+        speed_multiplier = g_player_control.run_speed;
+    }
+
+    return base_speed * speed_multiplier;
 }
 
 
