@@ -558,6 +558,47 @@ static void dump_turn_animation_data() {
     }
 }
 
+static void dump_turn_track_rotations() {
+    const char* names[] = {
+        "Stand_Turn_Left",
+        "Stand_Turn_Right",
+        "Sneak_Turn",
+        "Skid_Turn"
+    };
+
+    for (const char* wanted : names) {
+        auto it = g_anims.find(wanted);
+        if (it == g_anims.end()) {
+            LOGI("TURN TRACKS: %s NOT FOUND", wanted);
+            continue;
+        }
+
+        const Animation& anim = it->second;
+        LOGI("TURN TRACKS: %s duration=%.3f", anim.name.c_str(), anim.duration);
+
+        for (const auto& track : anim.tracks) {
+            if (track.bone_id == 1000 || track.keyframes.size() < 2) continue;
+
+            const auto& a = track.keyframes.front();
+            const auto& b = track.keyframes.back();
+
+            const float ay = 2.0f * atan2f(a.qy, a.qw);
+            const float by = 2.0f * atan2f(b.qy, b.qw);
+            const float delta = by - ay;
+
+            if (std::fabs(delta) > 0.05f) {
+                LOGI(
+                    "TURN TRACK: %s bone=%d name=%s yaw=%.3f->%.3f delta=%.3f deg=%.1f",
+                    anim.name.c_str(),
+                    track.bone_id,
+                    track.bone_name.c_str(),
+                    ay, by, delta, delta * 57.2957795f
+                );
+            }
+        }
+    }
+}
+
 static void rebuild_debug_animation_list() {
     g_debug_anim_list.clear();
     g_debug_anim_list.reserve(g_anims.size());
@@ -2736,6 +2777,7 @@ static void setup_model() {
         }
         rebuild_debug_animation_list();
         dump_turn_animation_data();
+        dump_turn_track_rotations();
     } else {
         g_anims.clear();
         g_debug_anim_list.clear();
