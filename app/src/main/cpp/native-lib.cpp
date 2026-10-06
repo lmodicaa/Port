@@ -2098,7 +2098,34 @@ static void setup_model() {
             upload_dff_to_gpu(cash_model, rd);
             dump_cash_debug(cash_model);
             g_model_render["cash"] = rd;
-            
+
+            const size_t skin_matrix_count =
+                g_cash_model.inverse_bind_matrices.size() / 16;
+            size_t mapped_bones = 0;
+
+            for (const auto& bone : g_cash_model.bones) {
+                if (bone.bone_id != 0xFFFFFFFF &&
+                    bone.matrix_index != 0xFFFFFFFF &&
+                    static_cast<size_t>(bone.matrix_index) <
+                        skin_matrix_count) {
+                    ++mapped_bones;
+                }
+            }
+
+            g_cash_skinning_enabled =
+                !g_cash_model.bones.empty() &&
+                skin_matrix_count > 0 &&
+                mapped_bones > 0;
+
+            LOGI(
+                "CASH SKINNING: enabled=%s bones=%zu "
+                "skinMatrices=%zu mapped=%zu",
+                g_cash_skinning_enabled ? "YES" : "NO",
+                g_cash_model.bones.size(),
+                skin_matrix_count,
+                mapped_bones
+            );
+
             g_cash_y_offset = 0.0f;
             LOGI("Cash model loaded. Y-Offset manual: %.3f", g_cash_y_offset);
         }
@@ -2335,9 +2362,11 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     g_on_ground = false;
     g_move_fwd  = 0.f;
     g_move_right= 0.f;
-    // Arrancar en bind pose: ninguna animación experimental puede
-    // deformar el modelo al iniciar la aplicación.
-    g_debug_anim_idx = -1;
+    // Arrancar en selección automática. El jugador debe comenzar
+    // en Stand_Idle y cambiar a Walk/Run según el movimiento.
+    g_debug_anim_idx = -2;
+    // Se habilita cuando el modelo cargado tenga un skeleton HAnim + Skin
+    // coherente. setup_model() hará la comprobación final.
     g_cash_skinning_enabled = false;
     g_cash_pos_adjust = {0.0f, 1.0f, 0.0f};
     g_cash_rot_adjust_deg = {0.0f, -91.0f, 180.0f};
@@ -3447,8 +3476,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             GL_FALSE,
             cash_model_m.m
         );
-        // Skinning experimental: disabled by default until the
-        // Skin palette <-> HAnim mapping is proven against Cash.
+        // Skinning real del skeleton HAnim + Skin del DFF.
         glUniform1i(
             loc_skinned,
             g_cash_skinning_enabled ? 1 : 0
