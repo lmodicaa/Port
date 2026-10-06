@@ -3377,6 +3377,32 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         // Registrar cada cambio real de locomoción para comprobar
         // que las zonas del stick están entrando en la animación correcta.
         if (anim && anim != g_current_anim) {
+            // Diagnóstico de root-motion real del IFP. No altera movimiento:
+            // registra si las pistas de locomoción contienen traslación.
+            float min_tx = 0.0f, max_tx = 0.0f;
+            float min_tz = 0.0f, max_tz = 0.0f;
+            bool has_translation = false;
+            for (const auto& track : anim->tracks) {
+                if (track.frame_type != 2 && track.frame_type != 3) continue;
+                for (const auto& key : track.keyframes) {
+                    if (!has_translation) {
+                        min_tx = max_tx = key.tx;
+                        min_tz = max_tz = key.tz;
+                        has_translation = true;
+                    } else {
+                        min_tx = std::min(min_tx, key.tx);
+                        max_tx = std::max(max_tx, key.tx);
+                        min_tz = std::min(min_tz, key.tz);
+                        max_tz = std::max(max_tz, key.tz);
+                    }
+                }
+            }
+            LOGI(
+                "ANIM ROOT DATA: %s translation=%d X=[%.3f,%.3f] Z=[%.3f,%.3f]",
+                anim->name.c_str(),
+                has_translation ? 1 : 0,
+                min_tx, max_tx, min_tz, max_tz
+            );
             LOGI(
                 "ANIM CHANGE: %s duration=%.3f tracks=%zu input=%.3f",
                 anim->name.c_str(),
