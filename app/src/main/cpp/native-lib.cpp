@@ -160,12 +160,46 @@ static void quat_slerp(
 }
 
 static Mat4 mat4_from_pos_quat(const float* pos, const float* rot) {
-    float x = rot[0], y = rot[1], z = rot[2], w = rot[3];
+    // RtQuatUnitConvertToMatrix / RenderWare HAnim:
+    // quaternion -> RwMatrix con la misma convención que nuestro
+    // Mat4 column-major de OpenGL.
+    float x = rot[0];
+    float y = rot[1];
+    float z = rot[2];
+    float w = rot[3];
+
+    const float xx = 2.0f * x * x;
+    const float xy = 2.0f * x * y;
+    const float xz = 2.0f * x * z;
+    const float xw = 2.0f * x * w;
+    const float yy = 2.0f * y * y;
+    const float yz = 2.0f * y * z;
+    const float yw = 2.0f * y * w;
+    const float zz = 2.0f * z * z;
+    const float zw = 2.0f * z * w;
+
     Mat4 r = {0};
-    r.m[0] = 1.0f - 2.0f*(y*y + z*z); r.m[1] = 2.0f*(x*y + z*w);      r.m[2] = 2.0f*(x*z - y*w);      r.m[3] = 0;
-    r.m[4] = 2.0f*(x*y - z*w);      r.m[5] = 1.0f - 2.0f*(x*x + z*z); r.m[6] = 2.0f*(y*z + x*w);      r.m[7] = 0;
-    r.m[8] = 2.0f*(x*z + y*w);      r.m[9] = 2.0f*(y*z - x*w);      r.m[10]= 1.0f - 2.0f*(x*x + y*y); r.m[11]= 0;
-    r.m[12]= pos[0];                r.m[13]= pos[1];                r.m[14]= pos[2];                r.m[15]= 1.0f;
+
+    r.m[0]  = 1.0f - (yy + zz);
+    r.m[1]  = xy - zw;
+    r.m[2]  = xz + yw;
+    r.m[3]  = 0.0f;
+
+    r.m[4]  = xy + zw;
+    r.m[5]  = 1.0f - (xx + zz);
+    r.m[6]  = yz - xw;
+    r.m[7]  = 0.0f;
+
+    r.m[8]  = xz - yw;
+    r.m[9]  = yz + xw;
+    r.m[10] = 1.0f - (xx + yy);
+    r.m[11] = 0.0f;
+
+    r.m[12] = pos[0];
+    r.m[13] = pos[1];
+    r.m[14] = pos[2];
+    r.m[15] = 1.0f;
+
     return r;
 }
 
