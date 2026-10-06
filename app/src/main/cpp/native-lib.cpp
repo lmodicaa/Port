@@ -4673,7 +4673,9 @@ static float snap_aim_angle(float angle) {
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeSetTouchSensitivity(JNIEnv*, jobject, jfloat percent) {
     const float p = std::max(0.0f, std::min(100.0f, percent));
-    g_touch_sensitivity = 0.05f + 2.95f * (p / 100.0f);
+    // 0% sigue siendo controlable; 100% duplica la velocidad nativa.
+    // El rango visual del SeekBar y el rango real quedan sincronizados.
+    g_touch_sensitivity = 0.5f + 1.5f * (p / 100.0f);
 }
 
 JNIEXPORT void JNICALL
