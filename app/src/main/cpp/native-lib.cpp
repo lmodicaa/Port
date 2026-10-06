@@ -159,6 +159,94 @@ static void quat_slerp(
     out[3] = w0 * a[3] + w1 * bw;
 }
 
+
+static bool sample_animation_bone(
+    const Animation* anim,
+    float animation_time,
+    const DFFBone& bone,
+    float* out_pos,
+    float* out_quat
+) {
+    out_pos[0] = bone.pos_x;
+    out_pos[1] = bone.pos_y;
+    out_pos[2] = bone.pos_z;
+
+    out_quat[0] = 0.0f;
+    out_quat[1] = 0.0f;
+    out_quat[2] = 0.0f;
+    out_quat[3] = 1.0f;
+
+    if (!anim || bone.bone_id == 0xFFFFFFFF) {
+        return false;
+    }
+
+    for (const auto& track : anim->tracks) {
+        if (track.bone_id != static_cast<int>(bone.bone_id) ||
+            track.keyframes.empty()) {
+            continue;
+        }
+
+        const AnimationKeyframe* k0 = &track.keyframes.front();
+        const AnimationKeyframe* k1 = &track.keyframes.front();
+
+        if (animation_time <= track.keyframes.front().time) {
+            k0 = &track.keyframes.front();
+            k1 = &track.keyframes.front();
+        } else {
+            bool found = false;
+            for (size_t k = 0; k + 1 < track.keyframes.size(); ++k) {
+                const auto& a = track.keyframes[k];
+                const auto& b = track.keyframes[k + 1];
+
+                if (animation_time >= a.time &&
+                    animation_time <= b.time) {
+                    k0 = &a;
+                    k1 = &b;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                k0 = &track.keyframes.back();
+                k1 = &track.keyframes.back();
+            }
+        }
+
+        float t = 0.0f;
+        if (k1 != k0 && k1->time > k0->time) {
+            t = (animation_time - k0->time) /
+                (k1->time - k0->time);
+            t = std::max(0.0f, std::min(1.0f, t));
+        }
+
+        const float q0[4] = {k0->qx, k0->qy, k0->qz, k0->qw};
+        const float q1[4] = {k1->qx, k1->qy, k1->qz, k1->qw};
+
+        quat_slerp(q0, q1, t, out_quat);
+
+        const float anim_tx = k0->tx + t * (k1->tx - k0->tx);
+        const float anim_ty = k0->ty + t * (k1->ty - k0->ty);
+        const float anim_tz = k0->tz + t * (k1->tz - k0->tz);
+
+        const bool root_motion_track = bone.bone_id == 1000;
+
+        if (track.frame_type == 1) {
+            out_pos[0] = bone.pos_x;
+            out_pos[1] = bone.pos_y;
+            out_pos[2] = bone.pos_z;
+        } else {
+            out_pos[0] = root_motion_track ? bone.pos_x : anim_tx;
+            out_pos[1] = anim_ty;
+            out_pos[2] = root_motion_track ? bone.pos_z : anim_tz;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
 static Mat4 mat4_from_pos_quat(const float* pos, const float* rot) {
     // RtQuatUnitConvertToMatrix / RenderWare HAnim:
     // quaternion -> RwMatrix con la misma convención que nuestro
@@ -538,6 +626,10 @@ static DFFModel g_cash_model;
 static float g_player_yaw = 0.0f;
 static float g_anim_time = 0.f;
 static std::string g_last_played_anim;
+static const Animation* g_current_anim = nullptr;
+static const Animation* g_previous_anim = nullptr;
+static float g_previous_anim_time = 0.0f;
+static float g_anim_transition_time = 0.0f;
 static float g_cam_yaw    = 0.0f;
 static float g_cam_pitch  = -0.2f;
 static float g_cam_dist   = 3.0f;
@@ -3280,20 +3372,36 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         }
         /*
          * --------------------------------------------------------
-         * Tiempo de animación
+         * Tiempo de animación y transición de movimiento
          * --------------------------------------------------------
+         *
+         * MOVE_TRANS_SPEED = 0.20 en los datos originales de Manhunt:
+         * es el tiempo de transición visual entre zonas de movimiento,
+         * NO un suavizado de la entrada ni de la velocidad física.
          */
+        const bool animation_changed = anim != g_current_anim;
+        if (animation_changed) {
+            g_previous_anim = g_current_anim;
+            g_previous_anim_time = g_anim_time;
+            g_anim_transition_time = 0.0f;
+
+            g_current_anim = anim;
+            g_last_played_anim = anim ? anim->name : std::string();
+            g_anim_time = 0.0f;
+
+            if (g_previous_anim && anim &&
+                g_previous_anim != anim) {
+                LOGI(
+                    "ANIM TRANSITION: %s -> %s (%.3fs)",
+                    g_previous_anim->name.c_str(),
+                    anim->name.c_str(),
+                    g_player_control.move_transition_speed
+                );
+            }
+        }
+
         float animation_time = 0.0f;
         if (anim && anim->duration > 0.0f) {
-            // Al cambiar de animación empezamos desde su primer frame.
-            // Esto evita que Walk/Run/Idle entren a mitad de una pose.
-            if (g_last_played_anim != anim->name) {
-                g_last_played_anim = anim->name;
-                g_anim_time = 0.0f;
-            }
-
-            // Locomoción e idle son cíclicos. Las animaciones de depuración
-            // se reproducen una sola vez para poder verlas completas.
             const bool loop_animation =
                 (g_debug_anim_idx == -2) ||
                 anim->name == "Stand_Idle" ||
@@ -3315,6 +3423,35 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 );
             }
         }
+
+        if (g_previous_anim &&
+            g_player_control.move_transition_speed > 0.0f &&
+            g_anim_transition_time <
+                g_player_control.move_transition_speed) {
+            g_anim_transition_time += dt;
+            g_previous_anim_time += dt;
+        }
+
+        float animation_transition_alpha = 1.0f;
+        if (g_previous_anim &&
+            g_player_control.move_transition_speed > 0.0f) {
+            animation_transition_alpha =
+                std::max(
+                    0.0f,
+                    std::min(
+                        1.0f,
+                        g_anim_transition_time /
+                            g_player_control.move_transition_speed
+                    )
+                );
+        }
+
+        if (animation_transition_alpha >= 1.0f) {
+            g_previous_anim = nullptr;
+            g_previous_anim_time = 0.0f;
+            g_anim_transition_time = 0.0f;
+        }
+
         // Skin usa el orden HAnim y la fórmula de RenderWare/librw:
         // inverseAtomic * hierarchyMatrix * inverseBind.
         // HAnim node -> FrameList se resolvió durante la carga del DFF.
@@ -3354,182 +3491,104 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
              * Pose base
              * ----------------------------------------------------
              */
-            float pos[3] = { bone.pos_x, bone.pos_y, bone.pos_z };
-            float quat[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+            float pos[3] = {
+                bone.pos_x,
+                bone.pos_y,
+                bone.pos_z
+            };
+            float quat[4] = {
+                0.0f, 0.0f, 0.0f, 1.0f
+            };
             bool animated = false;
+
             /*
-             * ----------------------------------------------------
-             * Buscar track usando SOLAMENTE bone_id
-             * ----------------------------------------------------
+             * Sample de la animación actual.
              *
-             * No usamos bone_idx como fallback.
-             *
-             * El IFP utiliza IDs como:
-             *
-             * 1000
-             * 1001
-             * 1003
-             * 1045
-             * 1095
-             *
-             * Por lo tanto hay que relacionarlos con el
-             * bone_id real del DFF.
+             * Los huesos sin track conservan exactamente el bind local.
              */
-            if (
-                anim &&
-                bone.bone_id != 0xFFFFFFFF
-            ) {
-                for (const auto& track : anim->tracks) {
-                    if (
-                        track.bone_id != static_cast<int>(bone.bone_id)
-                    ) {
-                        continue;
-                    }
-                    if (track.keyframes.empty()) {
-                        continue;
-                    }
-                    animated = true;
-                    /*
-                     * ------------------------------------------------
-                     * Buscar los dos keyframes
-                     * ------------------------------------------------
-                     */
-                    const AnimationKeyframe* k0 = &track.keyframes.front();
-                    const AnimationKeyframe* k1 = &track.keyframes.front();
-                    /*
-                     * Antes del primer frame.
-                     */
-                    if (
-                        animation_time <= track.keyframes.front().time
-                    ) {
-                        k0 = &track.keyframes.front();
-                        k1 = &track.keyframes.front();
+            animated = sample_animation_bone(
+                anim,
+                animation_time,
+                bone,
+                pos,
+                quat
+            );
+
+            /*
+             * Crossfade real de Manhunt:
+             * blend de la pose anterior hacia la nueva durante
+             * MOVE_TRANS_SPEED (0.20 s). La física/movimiento no
+             * participa en esta mezcla.
+             */
+            if (g_previous_anim &&
+                animation_transition_alpha < 1.0f) {
+                float previous_pos[3];
+                float previous_quat[4];
+
+                float previous_time = g_previous_anim_time;
+                if (g_previous_anim->duration > 0.0f) {
+                    const bool previous_loop =
+                        (g_debug_anim_idx == -2) ||
+                        g_previous_anim->name == "Stand_Idle" ||
+                        g_previous_anim->name == "Walk_Fwd" ||
+                        g_previous_anim->name == "Run_Fwd" ||
+                        g_previous_anim->name == "Sprint_Fwd";
+
+                    if (previous_loop) {
+                        previous_time = fmodf(
+                            previous_time,
+                            g_previous_anim->duration
+                        );
+                        if (previous_time < 0.0f)
+                            previous_time +=
+                                g_previous_anim->duration;
                     } else {
-                        bool found = false;
-                        for (
-                            size_t k = 0;
-                            k + 1 < track.keyframes.size();
-                            ++k
-                        ) {
-                            const auto& a = track.keyframes[k];
-                            const auto& b = track.keyframes[k + 1];
-                            if (
-                                animation_time >= a.time &&
-                                animation_time <= b.time
-                            ) {
-                                k0 = &a;
-                                k1 = &b;
-                                found = true;
-                                break;
-                            }
-                        }
-                        /*
-                         * Si estamos después del último keyframe,
-                         * mantenemos el último.
-                         */
-                        if (!found) {
-                            k0 = &track.keyframes.back();
-                            k1 = &track.keyframes.back();
-                        }
-                    }
-                    /*
-                     * ------------------------------------------------
-                     * Interpolación
-                     * ------------------------------------------------
-                     */
-                    float t = 0.0f;
-                    if (
-                        k1 != k0 &&
-                        k1->time > k0->time
-                    ) {
-                        t = (animation_time - k0->time) / (k1->time - k0->time);
-                        t = std::max(
-                            0.0f,
-                            std::min(1.0f, t)
+                        previous_time = std::min(
+                            previous_time,
+                            g_previous_anim->duration
                         );
                     }
-                    /*
-                     * ------------------------------------------------
-                     * Quaternion
-                     * ------------------------------------------------
-                     */
-                    const float q0[4] = {
-                        k0->qx, k0->qy, k0->qz, k0->qw
-                    };
-                    const float q1[4] = {
-                        k1->qx, k1->qy, k1->qz, k1->qw
-                    };
-
-                    /*
-                     * RenderWare HAnim interpola orientación con SLERP.
-                     */
-                    quat_slerp(
-                        q0,
-                        q1,
-                        t,
-                        quat
-                    );
-                    /*
-                     * ------------------------------------------------
-                     * Translation
-                     * ------------------------------------------------
-                     */
-                    // En Manhunt, los tracks con traducción contienen
-                    // la transformación local animada del hueso, no un delta
-                    // que deba sumarse al offset del FrameList.
-                    const float anim_tx =
-                        k0->tx + t * (k1->tx - k0->tx);
-                    const float anim_ty =
-                        k0->ty + t * (k1->ty - k0->ty);
-                    const float anim_tz =
-                        k0->tz + t * (k1->tz - k0->tz);
-
-                    // El movimiento horizontal del actor ya se aplica
-                    // mediante g_player_pos. No aplicamos la traslación X/Z
-                    // del root para evitar duplicar el movimiento del jugador.
-                    const bool root_motion_track =
-                        bone.bone_id == 1000;
-
-                    if (track.frame_type == 1) {
-                        // FrameType 1 = solo rotación: conservar la posición
-                        // estructural del FrameList.
-                        pos[0] = bone.pos_x;
-                        pos[1] = bone.pos_y;
-                        pos[2] = bone.pos_z;
-                    } else {
-                        // FrameType 2/3 = la posición del keyframe reemplaza
-                        // la posición local del FrameList.
-                        pos[0] = root_motion_track ? bone.pos_x : anim_tx;
-                        pos[1] = anim_ty;
-                        pos[2] = root_motion_track ? bone.pos_z : anim_tz;
-                    }
-                    /*
-                     * Debug solamente para algunos huesos.
-                     */
-                    static int debug_anim_counter = 0;
-                    if (
-                        debug_anim_counter++ % 120 == 0 &&
-                        (
-                            bone.bone_id == 1000 ||
-                            bone.bone_id == 1045 ||
-                            bone.bone_id == 1095
-                        )
-                    ) {
-                        LOGI(
-                            "ANIM APPLY: anim=%s bone=%u "
-                            "time=%.3f "
-                            "Q=(%.3f %.3f %.3f %.3f) "
-                            "P=(%.3f %.3f %.3f)",
-                            anim->name.c_str(),
-                            bone.bone_id,
-                            animation_time,
-                            quat[0], quat[1], quat[2], quat[3],
-                            pos[0], pos[1], pos[2]
-                        );
-                    }
-                    break;
                 }
+
+                sample_animation_bone(
+                    g_previous_anim,
+                    previous_time,
+                    bone,
+                    previous_pos,
+                    previous_quat
+                );
+
+                float blended_quat[4];
+                quat_slerp(
+                    previous_quat,
+                    quat,
+                    animation_transition_alpha,
+                    blended_quat
+                );
+
+                pos[0] =
+                    previous_pos[0] +
+                    (pos[0] - previous_pos[0]) *
+                    animation_transition_alpha;
+                pos[1] =
+                    previous_pos[1] +
+                    (pos[1] - previous_pos[1]) *
+                    animation_transition_alpha;
+                pos[2] =
+                    previous_pos[2] +
+                    (pos[2] - previous_pos[2]) *
+                    animation_transition_alpha;
+
+                quat[0] = blended_quat[0];
+                quat[1] = blended_quat[1];
+                quat[2] = blended_quat[2];
+                quat[3] = blended_quat[3];
+
+                animated =
+                    animated ||
+                    g_previous_anim != nullptr;
             }
+
             /*
              * --------------------------------------------------------
              * Matriz bind
