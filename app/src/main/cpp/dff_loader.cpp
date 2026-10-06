@@ -72,55 +72,105 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                 r.read<uint32_t>(); // flags
             }
             
+            // HAnim no usa el nodeIndex escrito en el stream para
+            // asociar el hueso con el Frame. La implementación de RenderWare
+            // adjunta cada HAnim node a su Frame buscando el mismo nodeID.
+            // Por eso primero guardamos el orden de nodos de la jerarquía y
+            // después resolvemos nodeID -> FrameList index.
+            std::vector<uint32_t> hanim_node_ids;
+
             // Extensions
             for (uint32_t i = 0; i < frameCount; i++) {
                 ChunkHeader ext = r.read_chunk();
                 size_t ext_end = r.pos + ext.size;
+
                 while (r.pos + sizeof(ChunkHeader) <= ext_end) {
                     ChunkHeader plug = r.read_chunk();
                     size_t plug_payload_start = r.pos;
-                    size_t plug_payload_end = plug_payload_start + plug.size;
+                    size_t plug_payload_end =
+                        plug_payload_start + plug.size;
+
                     if (plug.type == 0x011E) { // HAnim
                         uint32_t ver = r.read<uint32_t>();
                         uint32_t hanim_id = r.read<uint32_t>();
                         uint32_t nodeCount = r.read<uint32_t>();
+
                         if (nodeCount > 0) {
                             r.read<uint32_t>(); // flags
                             r.read<uint32_t>(); // keyFrameSize
-                            for (uint32_t n = 0; n < nodeCount; n++) {
-                                uint32_t nodeId = r.read<uint32_t>();
-                                uint32_t nodeIdx = r.read<uint32_t>();
-                                r.read<uint32_t>(); // flags
-                                model.bone_id_to_index[nodeId] = nodeIdx;
 
-                                // HAnim nodeIdx identifies the FrameList node.
-                                // Preserve the real bone ID on that frame so
-                                // animation tracks can resolve it later.
-                                if (nodeIdx < model.bones.size()) {
-                                    model.bones[nodeIdx].bone_id = nodeId;
-                                }
+                            hanim_node_ids.reserve(nodeCount);
+
+                            for (uint32_t n = 0;
+                                 n < nodeCount;
+                                 ++n) {
+                                const uint32_t nodeId =
+                                    r.read<uint32_t>();
+                                r.read<uint32_t>(); // nodeIndex: RW lo resuelve por ID
+                                r.read<uint32_t>(); // flags
+
+                                hanim_node_ids.push_back(nodeId);
                             }
                         } else {
-                            // HAnim Node (un frame individual)
-                            model.bones[i].bone_id = hanim_id;
+                            // HAnim Node individual del Frame.
+                            // Este es el ID que identifica el Frame.
+                            if (i < model.bones.size()) {
+                                model.bones[i].bone_id = hanim_id;
+                            }
                         }
                     }
-                    r.pos = plug_payload_end; // avanzar al fin del payload (evita doble-avance)
+
+                    r.pos = plug_payload_end;
                 }
-                r.pos = ext_end; // fix any bad size reading
+
+                r.pos = ext_end;
             }
 
-            // La matriz de Skin está indexada por el índice del hueso
-            // dentro del skeleton/frame list. HAnim no remapea esta matriz:
-            // HAnim se usa para resolver bone_id -> frame index cuando
-            // reproducimos las animaciones IFP.
+            // HAnim hierarchy order -> FrameList index.
+            // Skin inverseMatrices[i] y vertexBoneIndices[] usan el
+            // mismo índice i; ese i pertenece al orden de HAnim.
+            model.skin_bone_to_frame.clear();
+            model.skin_bone_to_frame.reserve(hanim_node_ids.size());
+
+            size_t mapped_hanim_nodes = 0;
+
+            for (uint32_t nodeId : hanim_node_ids) {
+                size_t frame_index = SIZE_MAX;
+
+                for (size_t frame = 0;
+                     frame < model.bones.size();
+                     ++frame) {
+                    if (model.bones[frame].bone_id == nodeId) {
+                        frame_index = frame;
+                        break;
+                    }
+                }
+
+                if (frame_index != SIZE_MAX) {
+                    model.skin_bone_to_frame.push_back(
+                        static_cast<uint8_t>(frame_index)
+                    );
+                    model.bone_id_to_index[nodeId] =
+                        static_cast<uint32_t>(frame_index);
+                    ++mapped_hanim_nodes;
+                } else {
+                    // Mantener la longitud de la tabla para conservar el
+                    // índice Skin, aunque este nodo no tenga Frame asociado.
+                    model.skin_bone_to_frame.push_back(0xFF);
+                }
+            }
+
+            // matrix_index representa el índice LOCAL del Skin/HAnim,
+            // no el FrameList index.
             for (uint32_t i = 0; i < frameCount; i++) {
                 model.bones[i].matrix_index = i;
             }
+
             LOGI(
-                "FrameList: %u frames. HAnim reservado para bone_id -> frame index; "
-                "Skin matrix_index usa directamente el frame index.",
-                frameCount
+                "FrameList: %u frames, HAnim nodes=%zu mapped=%zu",
+                frameCount,
+                hanim_node_ids.size(),
+                mapped_hanim_nodes
             );
             
             r.pos = frame_end;
@@ -326,9 +376,8 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                             }
                         }
 
-                        if (!usedBoneIndices.empty()) {
-                            model.skin_bone_to_frame = usedBoneIndices;
-                        }
+                        // usedBoneIndices es la lista de huesos usados
+                        // por esta geometría; NO es el mapeo HAnim -> Frame.
                         for (uint32_t i = 0; i < numVertices; i++) {
                             model.vertices[vertex_offset + i].bone_weights[0] = r.read<float>();
                             model.vertices[vertex_offset + i].bone_weights[1] = r.read<float>();
