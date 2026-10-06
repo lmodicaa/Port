@@ -161,8 +161,8 @@ class MainActivity : Activity() {
         var posY = 0f
         var posZ = 0f
         var rotX = 0f
-        var rotY = 0f
-        var rotZ = 0f
+        var rotY = -91f
+        var rotZ = 180f
 
         fun apply() {
             renderer.nativeSetCashTransform(
@@ -204,7 +204,12 @@ class MainActivity : Activity() {
 
         reset.setOnClickListener {
             bars.forEachIndexed { index, bar ->
-                bar.progress = if (index < 3) 300 else 180
+                bar.progress = when (index) {
+                    0, 1, 2, 3 -> if (index < 3) 300 else 180
+                    4 -> 89
+                    5 -> 360
+                    else -> 180
+                }
             }
             refreshFromBars()
         }
@@ -225,6 +230,13 @@ class MainActivity : Activity() {
             Toast.makeText(this, "Valores copiados", Toast.LENGTH_SHORT).show()
         }
 
+        // Valores finales de calibración.
+        bars[0].progress = 300
+        bars[1].progress = 300
+        bars[2].progress = 300
+        bars[3].progress = 180
+        bars[4].progress = 89
+        bars[5].progress = 360
         refreshFromBars()
     }
 
