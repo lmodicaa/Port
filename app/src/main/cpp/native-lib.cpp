@@ -109,31 +109,6 @@ static Mat4 mat4_from_pos_yaw(Vec3 pos, float yaw) {
 
 static DFFModel g_cash_model;
 
-static Vec3 mat4_transform_point(const Mat4& m, Vec3 p) {
-    return {
-        m.m[0] * p.x + m.m[4] * p.y + m.m[8]  * p.z + m.m[12],
-        m.m[1] * p.x + m.m[5] * p.y + m.m[9]  * p.z + m.m[13],
-        m.m[2] * p.x + m.m[6] * p.y + m.m[10] * p.z + m.m[14]
-    };
-}
-
-// Altura mínima del modelo Cash después de aplicar su transformación de ejes.
-// Se usa para que el punto más bajo del mesh quede justo sobre el piso.
-static float cash_model_min_y(const Mat4& rotation_m) {
-    if (g_cash_model.vertices.empty()) return 0.0f;
-
-    float min_y = 1e30f;
-    for (const auto& v : g_cash_model.vertices) {
-        const Vec3 p = mat4_transform_point(
-            rotation_m,
-            {v.x, v.y, v.z}
-        );
-        min_y = std::min(min_y, p.y);
-    }
-
-    return min_y;
-}
-
 static Mat4 mat4_from_pos_cash(Vec3 pos, float yaw) {
     // Baseline established during visual calibration:
     // Cash needs a Z-up -> Y-up axis conversion plus the runtime yaw.
@@ -324,11 +299,8 @@ static float g_cash_y_offset = 0.0f;
 // el frente del DFF debe girarse 90 grados para alinearlo con
 // el forward del jugador (-Z en yaw=0).
 static constexpr float CASH_MODEL_YAW_OFFSET = -1.57079632679f;
-// Calibración final de orientación obtenida con el menú de ajuste.
-// La altura vertical NO se fija aquí: se calcula automáticamente contra el suelo.
-static Vec3 g_cash_pos_adjust = {0.0f, 0.0f, 0.0f};
+static Vec3 g_cash_pos_adjust = {0.0f, 1.02f, 0.0f};
 static Vec3 g_cash_rot_adjust_deg = {0.0f, -91.0f, 180.0f};
-static constexpr float CASH_FOOT_CLEARANCE = 0.02f;
 
 static Mat4 mat4_rotate_x(float angle) {
     const float c = cosf(angle), s = sinf(angle);
@@ -497,8 +469,7 @@ void main() {
     vec4 pos = u_mvp * local_pos;
     gl_Position = pos;
     v_uv = a_uv;
-    v_color = a_color;
-    v_dist = pos.w;
+    v_color = a_color;    v_dist = pos.w;
     v_normal = normalize(mat3(u_model) * local_normal);})";
 
 // Fragment: texturas + colores de vértices + niebla negra (Manhunt style)
@@ -936,7 +907,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     // deformar el modelo al iniciar la aplicación.
     g_debug_anim_idx = -1;
     g_cash_skinning_enabled = false;
-    g_cash_pos_adjust = {0.0f, 0.0f, 0.0f};
+    g_cash_pos_adjust = {0.0f, 1.02f, 0.0f};
     g_cash_rot_adjust_deg = {0.0f, -91.0f, 180.0f};
 }
 
@@ -997,8 +968,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
 
     if (hit_wall(g_player_pos.x, waist_y, g_player_pos.z, nx, waist_y, nz)) {
         if (!hit_wall(g_player_pos.x, waist_y, g_player_pos.z, nx, waist_y, g_player_pos.z)) {
-            g_player_pos.x = nx;
-        } else if (!hit_wall(g_player_pos.x, waist_y, g_player_pos.z, g_player_pos.x, waist_y, nz)) {            g_player_pos.z = nz;
+            g_player_pos.x = nx;        } else if (!hit_wall(g_player_pos.x, waist_y, g_player_pos.z, g_player_pos.x, waist_y, nz)) {            g_player_pos.z = nz;
         }
     } else {
         g_player_pos.x = nx;
@@ -1497,7 +1467,19 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
          * Render
          * --------------------------------------------------------
          */
-        // Rotación final de Cash. La altura se calcula automáticamente para        // apoyar la parte más baja del mesh sobre el piso del nivel.
+        // Transformación calibrada de Cash. Los valores de orientación vienen
+        // del ajuste visual realizado con el modelo original.
+        const Vec3 center_pos = {
+            g_player_pos.x + g_cash_pos_adjust.x,
+            g_player_pos.y + g_cash_y_offset + g_cash_pos_adjust.y,
+            g_player_pos.z + g_cash_pos_adjust.z
+        };
+
+        Mat4 cash_model_m = mat4_from_pos_cash(
+            center_pos,
+            g_player_yaw + CASH_MODEL_YAW_OFFSET
+        );
+
         const float rx = g_cash_rot_adjust_deg.x * 0.017453292519943f;
         const float ry = g_cash_rot_adjust_deg.y * 0.017453292519943f;
         const float rz = g_cash_rot_adjust_deg.z * 0.017453292519943f;
@@ -1506,43 +1488,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             mat4_rotate_x(rx)
         );
 
-        const float floor_y = find_floor(
-            g_player_pos.x,
-            g_player_pos.y + 3.0f,
-            g_player_pos.z
-        );
-
-        // Calculamos la transformación sólo con rotación y sin traslación
-        // para conocer exactamente cuál será el Y mínimo del modelo.
-        Mat4 cash_rotation_m = mat4_from_pos_cash(
-            {0.0f, 0.0f, 0.0f},
-            g_player_yaw + CASH_MODEL_YAW_OFFSET
-        );
-        cash_rotation_m = mat4_mul(
-            cash_rotation_m,
-            extra_rot
-        );
-
-        float model_min_y = cash_model_min_y(cash_rotation_m);
-
-        float cash_base_y = g_player_pos.y;
-        if (floor_y > -1e8f && model_min_y < 1e20f) {
-            cash_base_y =
-                floor_y
-                - model_min_y
-                + CASH_FOOT_CLEARANCE;
-        }
-
-        const Vec3 center_pos = {
-            g_player_pos.x + g_cash_pos_adjust.x,
-            cash_base_y + g_cash_y_offset + g_cash_pos_adjust.y,
-            g_player_pos.z + g_cash_pos_adjust.z
-        };
-
-        Mat4 cash_model_m = mat4_from_pos_cash(
-            center_pos,
-            g_player_yaw + CASH_MODEL_YAW_OFFSET
-        );
         cash_model_m = mat4_mul(
             cash_model_m,
             extra_rot
