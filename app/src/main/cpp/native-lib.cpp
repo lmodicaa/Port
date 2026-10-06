@@ -755,15 +755,11 @@ static float g_cam_dist   = 3.0f;
 // La animación nunca modifica g_player_yaw: el giro físico del actor sigue
 // siendo independiente, como en el juego original.
 static int g_turn_anim_request = 0; // -1 izquierda, +1 derecha
-// Sentido del último arrastre horizontal continuo.
-static int g_turn_input_sign = 0;
-// Una sola animación de giro por gesto continuo. El movimiento del dedo
-// puede tener pequeñas inversiones de signo por jitter y no debe encadenar
-// nuevas animaciones mientras el mismo gesto siga activo.
-static bool g_turn_gesture_consumed = false;
 // Animación de giro actualmente en reproducción. Se deja terminar aunque
 // el dedo siga apoyado, tal como una animación de transición no-loop.
 static int g_turn_anim_active = 0; // -1 izquierda, +1 derecha
+static float g_turn_input_accum = 0.0f;
+static float g_turn_anim_start_yaw = 0.0f;
 
 // Movimiento joystick (actualizados desde Kotlin)
 static float g_move_fwd   = 0.f;  // -1..1  (adelante/atrás)
