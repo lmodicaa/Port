@@ -401,6 +401,15 @@ static const float MOVE_SPEED     = 10.0f;
 // COL "player", evitando convertir paredes bajas en rampas.
 static const float PLAYER_MAX_STEP_HEIGHT = 0.50f;
 
+// Desnivel máximo que seguimos automáticamente por subpaso cuando el
+// actor ya está apoyado en el suelo. Es menor que el step-up para que
+// una pendiente se sienta continua y no como una sucesión de saltos.
+static const float PLAYER_GROUND_FOLLOW_HEIGHT = 0.18f;
+
+// Pendiente máxima caminable. Las superficies más inclinadas siguen
+// siendo tratadas como obstáculos y requieren otra resolución.
+static const float PLAYER_MAX_SLOPE_Y = 0.70f;
+
 // La forma de colisión del jugador se obtiene del modelo "player"
 // de collisions.col (2 esferas + 1 línea), como en el juego.
 static const ColModel* g_player_col_model = nullptr;
@@ -2320,6 +2329,63 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         const float current_waist_y = g_player_pos.y + 1.0f;
         const float wanted_x = g_player_pos.x + step_dx;
         const float wanted_z = g_player_pos.z + step_dz;
+
+        // Si ya estamos sobre el suelo, seguimos el próximo punto del
+        // terreno de forma continua. Esto evita que una pendiente larga
+        // sea interpretada como una pared o como muchos escalones.
+        if (g_on_ground) {
+            const float current_floor = find_player_floor(
+                g_player_pos.x,
+                g_player_pos.y + 2.0f,
+                g_player_pos.z
+            );
+            const float wanted_floor = find_player_floor(
+                wanted_x,
+                g_player_pos.y + 2.0f,
+                wanted_z
+            );
+
+            if (current_floor > -1e8f &&
+                wanted_floor > -1e8f) {
+                const float floor_delta =
+                    wanted_floor - current_floor;
+
+                if (fabsf(floor_delta) <=
+                        PLAYER_GROUND_FOLLOW_HEIGHT + 0.001f) {
+                    // Solo seguimos cambios de altura pequeños. La
+                    // comprobación normal de COL sigue siendo obligatoria
+                    // antes de aceptar la nueva posición horizontal.
+                    Vec3 follow_normal{};
+                    if (!player_collision_at(
+                            wanted_x,
+                            current_waist_y,
+                            wanted_z,
+                            &follow_normal
+                        )) {
+                        g_player_pos.x = wanted_x;
+                        g_player_pos.z = wanted_z;
+                        g_player_pos.y = wanted_floor;
+                        g_vel_y = 0.0f;
+                        g_on_ground = true;
+                        continue;
+                    }
+
+                    // Una pendiente caminable puede hacer contacto con
+                    // la esfera inferior durante el avance. No dejamos
+                    // que ese contacto se convierta en una pared.
+                    if (fabsf(follow_normal.y) >=
+                            PLAYER_MAX_SLOPE_Y &&
+                        floor_delta >= -0.05f) {
+                        g_player_pos.x = wanted_x;
+                        g_player_pos.z = wanted_z;
+                        g_player_pos.y = wanted_floor;
+                        g_vel_y = 0.0f;
+                        g_on_ground = true;
+                        continue;
+                    }
+                }
+            }
+        }
 
         Vec3 collision_normal{};
         if (!player_collision_at(
