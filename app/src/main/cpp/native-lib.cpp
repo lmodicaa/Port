@@ -886,6 +886,12 @@ static float g_stamina_remaining = 20.0f;
 static float g_stamina_recovery_delay = 0.0f;
 static bool g_sprint_active = false;
 
+// Inercia de locomoción. El PC dispone de una etapa de aceleración en
+// CPlayerTypeData; aquí mantenemos esa sensación sin ralentizar el IFP:
+// la animación sigue a velocidad normal y solo la velocidad física entra
+// y sale progresivamente.
+static Vec3 g_locomotion_velocity = {0.0f, 0.0f, 0.0f};
+
 static bool sprint_is_active() {
     return g_sprint_active;
 }
@@ -3217,6 +3223,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     g_locomotion_special_anim = nullptr;
     g_locomotion_was_moving = false;
     g_last_move_dir = {0.0f, 0.0f, -1.0f};
+    g_locomotion_velocity = {0.0f, 0.0f, 0.0f};
     // Empezamos en bind pose; después de validar Skin se activa el IFP.
     g_debug_anim_idx = -1;
     g_cash_skinning_enabled = false;
@@ -3435,7 +3442,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     const bool special_motion_active =
         g_locomotion_special_anim != nullptr;
 
-    const float movement_speed =
+    const float target_movement_speed =
         scaled_root_distance > 0.0001f
             ? scaled_root_distance / std::max(dt, 0.0001f)
             : 0.0f;
@@ -3443,22 +3450,56 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     // Durante un skid o una transición de arranque no siempre hay una
     // entrada nueva que deba definir la dirección. En reposo completo no
     // aplicamos root-motion: Cash no puede avanzar solo.
-    const Vec3 movement_dir =
+    const Vec3 target_movement_dir =
         currently_moving ? vel_xz :
         (special_motion_active ? g_last_move_dir :
                                  Vec3{0.0f, 0.0f, 0.0f});
 
-    // La locomoción Walk usa la velocidad completa de su animación.
-    // La intensidad del stick solo determina si hay movimiento, no ralentiza
-    // artificialmente el ciclo ni el desplazamiento del personaje.
+    // La aceleración del movimiento real se hace aparte del IFP. Esto evita
+    // alterar la velocidad de reproducción de Walk_Fwd y mantiene los pies
+    // coherentes con el ciclo, mientras el cuerpo tarda un instante en
+    // adquirir/perder velocidad como en el control original.
+    const float acceleration_time =
+        std::max(
+            0.08f,
+            std::min(
+                0.30f,
+                g_player_control.move_transition_speed
+            )
+        );
+
+    const float speed_blend =
+        1.0f - expf(-dt / acceleration_time);
+
+    Vec3 target_velocity = {
+        target_movement_dir.x * target_movement_speed,
+        0.0f,
+        target_movement_dir.z * target_movement_speed
+    };
+
+    g_locomotion_velocity.x +=
+        (target_velocity.x - g_locomotion_velocity.x) *
+        speed_blend;
+    g_locomotion_velocity.z +=
+        (target_velocity.z - g_locomotion_velocity.z) *
+        speed_blend;
+
+    const float locomotion_velocity_len = sqrtf(
+        g_locomotion_velocity.x * g_locomotion_velocity.x +
+        g_locomotion_velocity.z * g_locomotion_velocity.z
+    );
+
+    // Evitar microdesplazamientos residuales cuando el stick ya se soltó.
+    if (!currently_moving &&
+        !special_motion_active &&
+        locomotion_velocity_len < 0.02f) {
+        g_locomotion_velocity = {0.0f, 0.0f, 0.0f};
+    }
+
     const float move_dx =
-        special_motion_active || currently_moving
-            ? movement_dir.x * movement_speed * dt
-            : 0.0f;
+        g_locomotion_velocity.x * dt;
     const float move_dz =
-        special_motion_active || currently_moving
-            ? movement_dir.z * movement_speed * dt
-            : 0.0f;
+        g_locomotion_velocity.z * dt;
 
     // Resolver el desplazamiento en pequeños pasos evita atravesar
     // superficies finas cuando un frame produce un movimiento grande.
