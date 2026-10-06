@@ -4,6 +4,12 @@ import android.app.Activity
 import android.opengl.GLSurfaceView
 import android.os.Bundle
 import android.view.MotionEvent
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.widget.Button
+import android.widget.SeekBar
+import android.widget.TextView
+import android.widget.Toast
 import kotlin.math.hypot
 import kotlin.math.sqrt
 
@@ -123,7 +129,117 @@ class MainActivity : Activity() {
         findViewById<android.widget.Button>(R.id.btn_action).setOnClickListener {
             renderer.nativeNextDebugAnimation()
         }
+
+        setupCashCalibrationPanel()
     }
+
+    private fun setupCashCalibrationPanel() {
+        val panel = findViewById<android.view.View>(R.id.cash_calibration_panel)
+        val toggle = findViewById<Button>(R.id.btn_adjust)
+        val reset = findViewById<Button>(R.id.btn_reset_adjust)
+        val copy = findViewById<Button>(R.id.btn_copy_adjust)
+
+        val labels = arrayOf(
+            findViewById<TextView>(R.id.lbl_pos_x),
+            findViewById<TextView>(R.id.lbl_pos_y),
+            findViewById<TextView>(R.id.lbl_pos_z),
+            findViewById<TextView>(R.id.lbl_rot_x),
+            findViewById<TextView>(R.id.lbl_rot_y),
+            findViewById<TextView>(R.id.lbl_rot_z)
+        )
+
+        val bars = arrayOf(
+            findViewById<SeekBar>(R.id.seek_pos_x),
+            findViewById<SeekBar>(R.id.seek_pos_y),
+            findViewById<SeekBar>(R.id.seek_pos_z),
+            findViewById<SeekBar>(R.id.seek_rot_x),
+            findViewById<SeekBar>(R.id.seek_rot_y),
+            findViewById<SeekBar>(R.id.seek_rot_z)
+        )
+
+        var posX = 0f
+        var posY = 0f
+        var posZ = 0f
+        var rotX = 0f
+        var rotY = 0f
+        var rotZ = 0f
+
+        fun apply() {
+            renderer.nativeSetCashTransform(
+                posX, posY, posZ,
+                rotX, rotY, rotZ
+            )
+
+            labels[0].text = "Pos X: %+.2f m".format(posX)
+            labels[1].text = "Pos Y: %+.2f m".format(posY)
+            labels[2].text = "Pos Z: %+.2f m".format(posZ)
+            labels[3].text = "Rot X: %+.0f°".format(rotX)
+            labels[4].text = "Rot Y: %+.0f°".format(rotY)
+            labels[5].text = "Rot Z: %+.0f°".format(rotZ)
+        }
+
+        fun refreshFromBars() {
+            posX = (bars[0].progress - 300) / 100f
+            posY = (bars[1].progress - 300) / 100f
+            posZ = (bars[2].progress - 300) / 100f
+            rotX = (bars[3].progress - 180).toFloat()
+            rotY = (bars[4].progress - 180).toFloat()
+            rotZ = (bars[5].progress - 180).toFloat()
+            apply()
+        }
+
+        bars.forEach { bar ->
+            bar.setOnSeekBarChangeListener(
+                simpleSeekListener { refreshFromBars() }
+            )
+        }
+
+        toggle.setOnClickListener {
+            panel.visibility =
+                if (panel.visibility == android.view.View.VISIBLE)
+                    android.view.View.GONE
+                else
+                    android.view.View.VISIBLE
+        }
+
+        reset.setOnClickListener {
+            bars.forEachIndexed { index, bar ->
+                bar.progress = if (index < 3) 300 else 180
+            }
+            refreshFromBars()
+        }
+
+        copy.setOnClickListener {
+            val values =
+                "Pos X=\${"%.2f".format(posX)}, " +
+                "Pos Y=\${"%.2f".format(posY)}, " +
+                "Pos Z=\${"%.2f".format(posZ)}, " +
+                "Rot X=\${"%.0f".format(rotX)}°, " +
+                "Rot Y=\${"%.0f".format(rotY)}°, " +
+                "Rot Z=\${"%.0f".format(rotZ)}°"
+
+            val clipboard =
+                getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(
+                ClipData.newPlainText("Cash transform", values)
+            )
+            Toast.makeText(this, "Valores copiados", Toast.LENGTH_SHORT).show()
+        }
+
+        refreshFromBars()
+    }
+
+    private fun simpleSeekListener(onChanged: () -> Unit) =
+        object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(
+                seekBar: SeekBar?,
+                progress: Int,
+                fromUser: Boolean
+            ) = onChanged()
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        }
 
     override fun onResume() { super.onResume(); glView.onResume() }
     override fun onPause()  { super.onPause();  glView.onPause()  }
