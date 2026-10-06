@@ -58,6 +58,10 @@ struct DFFModel {
     // Se resuelve por nodeID, igual que RenderWare al adjuntar HAnim.
     std::vector<uint8_t> skin_bone_to_frame;
 
+    // Flags de cada nodo HAnim, en el mismo orden que
+    // skin_bone_to_frame. Bit 0 = POP, bit 1 = PUSH.
+    std::vector<uint32_t> hanim_node_flags;
+
     // FrameList index usado por el Atomic que instancia esta geometría.
     // 0xFFFFFFFF = no encontrado/no disponible.
     uint32_t atomic_frame_index = 0xFFFFFFFF;
