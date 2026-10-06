@@ -755,9 +755,11 @@ static float g_cam_dist   = 3.0f;
 // La animación nunca modifica g_player_yaw: el giro físico del actor sigue
 // siendo independiente, como en el juego original.
 static int g_turn_anim_request = 0; // -1 izquierda, +1 derecha
-// Sentido del último arrastre horizontal continuo. Evita reiniciar
-// Stand_Turn_* en cada ACTION_MOVE mientras el dedo sigue apoyado.
+// Sentido del último arrastre horizontal continuo.
 static int g_turn_input_sign = 0;
+// Animación de giro actualmente en reproducción. Se deja terminar aunque
+// el dedo siga apoyado, tal como una animación de transición no-loop.
+static int g_turn_anim_active = 0; // -1 izquierda, +1 derecha
 
 // Movimiento joystick (actualizados desde Kotlin)
 static float g_move_fwd   = 0.f;  // -1..1  (adelante/atrás)
@@ -3580,15 +3582,20 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 std::string wanted = std::string(family) + direction;
                 anim = find_anim(wanted.c_str());
             } else {
-                // Sin desplazamiento, el giro horizontal del apuntado usa
-                // las animaciones originales de giro en parado.
-                if (g_turn_anim_request != 0) {
+                // Sin desplazamiento, reproducir la animación de giro original
+                // completa. No se reinicia mientras el dedo permanece apoyado.
+                if (g_turn_anim_active == 0 &&
+                    g_turn_anim_request != 0) {
+                    g_turn_anim_active = g_turn_anim_request;
+                    g_turn_anim_request = 0;
+                }
+
+                if (g_turn_anim_active != 0) {
                     anim = find_anim(
-                        g_turn_anim_request > 0
+                        g_turn_anim_active > 0
                             ? "Stand_Turn_Right"
                             : "Stand_Turn_Left"
                     );
-                    g_turn_anim_request = 0;
                 }
 
                 if (!anim) {
@@ -3700,6 +3707,15 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                     anim->duration
                 );
             }
+        }
+
+        // Un giro no es una animación de locomoción: cuando llega al final,
+        // volver al estado Stand. Esto evita que se corte al frame siguiente
+        // y tampoco permite que quede en loop.
+        if (g_turn_anim_active != 0 &&
+            anim &&
+            animation_time >= anim->duration - 0.0001f) {
+            g_turn_anim_active = 0;
         }
 
         if (g_previous_anim &&
