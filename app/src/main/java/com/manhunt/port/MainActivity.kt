@@ -138,10 +138,6 @@ class MainActivity : Activity() {
         findViewById<android.widget.Button>(R.id.btn_jump).setOnClickListener {
             renderer.nativeJump()
         }
-        
-        findViewById<android.widget.Button>(R.id.btn_action).setOnClickListener {
-            renderer.nativeNextDebugAnimation()
-        }
 
         setupCashCalibrationPanel()
     }
