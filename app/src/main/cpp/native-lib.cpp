@@ -753,9 +753,6 @@ static float g_cam_pitch  = -0.2f;
 static float g_cam_dist   = 3.0f;
 static float g_cam_stair_pitch = 0.0f;
 static float g_cam_stair_pitch_target = 0.0f;
-static bool g_cam_recentre_requested = false;
-static int g_cam_zoom_level = 0;
-static float g_cam_zoom_factor = 1.0f;
 static const Animation* g_turn_anim = nullptr;
 static bool g_turn_gesture_active = false;
 static float g_turn_gesture_amount = 0.0f;
@@ -864,12 +861,6 @@ struct PlayerControlConfig {
     float cam_stair_speed = 500.0f;
     float aim_zones[10] = {3.0f, 8.0f, 12.0f, 18.0f, 25.0f, 35.0f, 45.0f, 57.0f, 76.0f, 125.0f};
     float vertical_aim_limit = 9.30f;
-    float zoom_aim_scale = 1.2f;
-    float zoom_aim_scale_moving = 1.2f;
-    float zoom_levels[2] = {2.0f, 12.0f};
-    float zoom_speed = 1.2f;
-    float zoom_move_scales[2] = {0.7f, 0.4f};
-    int zoom_max_zones[2] = {8, 5};
     float turn_pause = 0.27f;
     float turn_acceleration = 4.0f;
     float extra_turn_speed = 50.0f;
@@ -1134,24 +1125,6 @@ static void parse_entity_type_data(
                 parts >> g_player_control.cam_recentre_speed;
             } else if (lower_key == "cam_stair_speed") {
                 parts >> g_player_control.cam_stair_speed;
-            } else if (lower_key == "zoom_aim_scale") {
-                parts >> g_player_control.zoom_aim_scale;
-            } else if (lower_key == "zoom_aim_scale_moving") {
-                parts >> g_player_control.zoom_aim_scale_moving;
-            } else if (lower_key == "zoom_levels") {
-                char comma;
-                parts >> g_player_control.zoom_levels[0] >> comma
-                      >> g_player_control.zoom_levels[1];
-            } else if (lower_key == "zoom_speed") {
-                parts >> g_player_control.zoom_speed;
-            } else if (lower_key == "zoom_move_scales") {
-                char comma;
-                parts >> g_player_control.zoom_move_scales[0] >> comma
-                      >> g_player_control.zoom_move_scales[1];
-            } else if (lower_key == "zoom_max_zones") {
-                char comma;
-                parts >> g_player_control.zoom_max_zones[0] >> comma
-                      >> g_player_control.zoom_max_zones[1];
             } else if (lower_key == "move_trans_speed") {
                 parts >> g_player_control.move_transition_speed;
             } else if (lower_key == "sneak_walk_speed") {
@@ -2908,9 +2881,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     g_cam_pitch = 0.f;
     g_cam_stair_pitch = 0.f;
     g_cam_stair_pitch_target = 0.f;
-    g_cam_recentre_requested = false;
-    g_cam_zoom_level = 0;
-    g_cam_zoom_factor = 1.0f;
     g_vel_y     = 0.f;
     g_on_ground = false;
     g_move_fwd  = 0.f;
@@ -3380,43 +3350,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         return current + (delta > 0.0f ? max_step : -max_step);
     };
 
-    auto approach_angle = [](float current, float target, float speed, float dt_local) {
-        const float pi = 3.14159265359f;
-        float delta = atan2f(
-            sinf(target - current),
-            cosf(target - current)
-        );
-        const float max_step = std::max(0.0f, speed) * dt_local;
-        if (fabsf(delta) <= max_step || max_step <= 0.0f) {
-            return target;
-        }
-        return current + (delta > 0.0f ? max_step : -max_step);
-    };
-
-    // El zoom original tarda ZOOM_SPEED segundos en alcanzar el nivel pedido.
-    const float zoom_target =
-        g_cam_zoom_level <= 0
-            ? 1.0f
-            : std::max(
-                1.0f,
-                g_player_control.zoom_levels[
-                    std::min(g_cam_zoom_level - 1, 1)
-                ]
-            );
-
-    const float zoom_rate =
-        g_player_control.zoom_speed > 0.001f
-            ? fabsf(zoom_target - g_cam_zoom_factor) /
-              g_player_control.zoom_speed
-            : fabsf(zoom_target - g_cam_zoom_factor) * 10.0f;
-
-    g_cam_zoom_factor = approach_scalar(
-        g_cam_zoom_factor,
-        zoom_target,
-        std::max(0.001f, zoom_rate),
-        cam_dt
-    );
-
     // Buscar la altura del suelo ligeramente por delante de Cash. Esto hace
     // que una escalera ascendente levante la cámara y una descendente la baje,
     // pero sin moverla de golpe.
@@ -3473,32 +3406,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         g_player_control.cam_stair_speed * 0.0174532925f,
         cam_dt
     );
-
-    if (g_cam_recentre_requested) {
-        g_cam_yaw = approach_angle(
-            g_cam_yaw,
-            g_player_yaw,
-            g_player_control.cam_recentre_speed * 0.0174532925f,
-            cam_dt
-        );
-
-        g_cam_pitch = approach_scalar(
-            g_cam_pitch,
-            g_cam_stair_pitch,
-            g_player_control.cam_recentre_speed * 0.0174532925f,
-            cam_dt
-        );
-
-        if (fabsf(
-                atan2f(
-                    sinf(g_player_yaw - g_cam_yaw),
-                    cosf(g_player_yaw - g_cam_yaw)
-                )
-            ) < 0.01f &&
-            fabsf(g_cam_pitch - g_cam_stair_pitch) < 0.01f) {
-            g_cam_recentre_requested = false;
-        }
-    }
 
     // ── Cámara Orbit ───────────────────────────────────────────────────────
     // CAM_POSITION del entityTypeData.ini:
@@ -3658,20 +3565,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     if (!g_program || !g_vao || g_groups.empty()) return;
 
     float aspect = g_height > 0 ? (float)g_width / (float)g_height : 1.f;
-    const float base_fov_y = 1.22f;
-    const float zoom_magnification =
-        std::max(1.0f, g_cam_zoom_factor);
-    const float effective_fov_y =
-        2.0f * atanf(
-            tanf(base_fov_y * 0.5f) /
-            zoom_magnification
-        );
-    Mat4 proj = mat4_perspective(
-        effective_fov_y,
-        aspect,
-        0.1f,
-        800.f
-    );
+    Mat4 proj = mat4_perspective(1.22f, aspect, 0.1f, 800.f);
     Mat4 view = mat4_look_at(cam_pos, target, {0.f, 1.f, 0.f});
     Mat4 model_m = mat4_identity();
     Mat4 mvp = mat4_mul(mat4_mul(proj, view), model_m);
@@ -4718,19 +4612,6 @@ static float aim_zone_speed(float stick_distance, bool vertical) {
 
     float zone_pos = d * 10.0f;
 
-    // Durante el zoom el juego limita la zona máxima que puede usar
-    // el stick de apuntado. Zoom 1 -> ZONE 8, zoom 2 -> ZONE 5.
-    if (g_cam_zoom_level > 0) {
-        const int zoom_index =
-            std::max(0, std::min(1, g_cam_zoom_level - 1));
-        zone_pos = std::min(
-            zone_pos,
-            static_cast<float>(
-                g_player_control.zoom_max_zones[zoom_index]
-            )
-        );
-    }
-
     if (vertical) {
         zone_pos = std::min(zone_pos, g_player_control.vertical_aim_limit);
     }
@@ -4750,33 +4631,6 @@ static float snap_aim_angle(float angle) {
     const float nearest = std::round(angle / step) * step;
     const float delta = atan2f(sinf(angle - nearest), cosf(angle - nearest));
     return fabsf(delta) <= width ? nearest : angle;
-}
-
-JNIEXPORT void JNICALL
-Java_com_manhunt_port_ManhuntRenderer_nativeRecenterCamera(JNIEnv*, jobject) {
-    g_cam_recentre_requested = true;
-    g_aim_hold_time = 0.0f;
-    g_turn_gesture_active = false;
-    g_turn_gesture_amount = 0.0f;
-    g_turn_anim = nullptr;
-}
-
-JNIEXPORT void JNICALL
-Java_com_manhunt_port_ManhuntRenderer_nativeCycleZoom(JNIEnv*, jobject) {
-    ++g_cam_zoom_level;
-    if (g_cam_zoom_level > 2) {
-        g_cam_zoom_level = 0;
-    }
-
-    LOGI(
-        "CAM ZOOM: level=%d factor=%.2f",
-        g_cam_zoom_level,
-        g_cam_zoom_level == 0
-            ? 1.0f
-            : g_player_control.zoom_levels[
-                std::min(g_cam_zoom_level - 1, 1)
-              ]
-    );
 }
 
 JNIEXPORT void JNICALL
@@ -4819,30 +4673,12 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
     }
 
     const float touch_multiplier = touch_mode ? g_touch_sensitivity : 1.0f;
-    const int zoom_index =
-        std::max(0, std::min(1, g_cam_zoom_level - 1));
-    const bool moving_while_aiming =
-        std::sqrt(
-            g_move_fwd * g_move_fwd +
-            g_move_right * g_move_right
-        ) > 0.01f;
-    const float base_zoom_scale =
-        moving_while_aiming
-            ? g_player_control.zoom_aim_scale_moving
-            : g_player_control.zoom_aim_scale;
-    const float zoom_aim_scale =
-        g_cam_zoom_level > 0
-            ? base_zoom_scale *
-              g_player_control.zoom_move_scales[zoom_index]
-            : 1.0f;
     const float horizontal_speed =
         aim_zone_speed(distance, false) *
-        touch_multiplier *
-        zoom_aim_scale;
+        touch_multiplier;
     const float vertical_speed =
         aim_zone_speed(distance, true) *
-        touch_multiplier *
-        zoom_aim_scale;
+        touch_multiplier;
 
     float yaw_speed = horizontal_speed;
     const bool full_horizontal =
@@ -4889,7 +4725,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
     }
 
     g_cam_yaw = g_player_yaw;
-    g_cam_recentre_requested = false;
 
     const float pitch_delta =
         vertical_speed * (3.14159265359f / 180.0f) * y * dt;
