@@ -26,9 +26,11 @@ class MainActivity : Activity() {
 
     // ── Estado del toque derecho (mirar) ─────────────────────────────────────
     private var rightPointerId = -1
-    private var rightStartX = 0f
-    private var rightStartY = 0f
-    private val RIGHT_STICK_RADIUS = 200f
+    private var rightLastX = 0f
+    private var rightLastY = 0f
+    // Sensibilidad del arrastre táctil: píxeles de desplazamiento para alcanzar
+    // la velocidad máxima de la zona de apuntado.
+    private val TOUCH_AIM_DISTANCE = 28f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -86,17 +88,17 @@ class MainActivity : Activity() {
                                     renderer.nativeMove(fwd, right)
                                 }
                                 rightPointerId -> {
-                                    var dx = cx - rightStartX
-                                    var dy = cy - rightStartY
-                                    val dist = hypot(dx, dy)
-                                    if (dist > RIGHT_STICK_RADIUS) {
-                                        dx *= RIGHT_STICK_RADIUS / dist
-                                        dy *= RIGHT_STICK_RADIUS / dist
-                                    }
-                                    renderer.nativeLook(
-                                        dx / RIGHT_STICK_RADIUS,
-                                        dy / RIGHT_STICK_RADIUS
-                                    )
+                                    // Apuntado táctil: usamos el desplazamiento desde el último
+                                    // evento, no una posición fija desde donde comenzó el toque.
+                                    val dx = cx - rightLastX
+                                    val dy = cy - rightLastY
+                                    rightLastX = cx
+                                    rightLastY = cy
+
+                                    val nx = (dx / TOUCH_AIM_DISTANCE).coerceIn(-1f, 1f)
+                                    val ny = (dy / TOUCH_AIM_DISTANCE).coerceIn(-1f, 1f)
+
+                                    renderer.nativeLook(nx, ny)
                                 }
                             }
                         }
