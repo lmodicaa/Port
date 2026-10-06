@@ -396,6 +396,11 @@ static bool   g_on_ground= false;
 static const float GRAVITY        = -20.0f;
 static const float MOVE_SPEED     = 10.0f;
 
+// Altura máxima de escalón que el actor puede salvar sin saltar.
+// Se mantiene por debajo de la altura de las esferas inferiores del
+// COL "player", evitando convertir paredes bajas en rampas.
+static const float PLAYER_MAX_STEP_HEIGHT = 0.50f;
+
 // La forma de colisión del jugador se obtiene del modelo "player"
 // de collisions.col (2 esferas + 1 línea), como en el juego.
 static const ColModel* g_player_col_model = nullptr;
@@ -2147,6 +2152,37 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             )) {
             g_player_pos.x = wanted_x;
             g_player_pos.z = wanted_z;
+            continue;
+        }
+
+        // Manhunt permite que el actor suba pequeños escalones sin
+        // saltar. Primero intentamos resolver el contacto como un
+        // "step-up": si en la posición deseada hay un suelo apenas más
+        // alto que el actual, desplazamos al actor hasta esa cota y
+        // dejamos que el resolvedor vertical siga controlando el resto.
+        //
+        // No usamos el modelo render ni una caja inventada: el suelo
+        // sigue viniendo de la geometría de colisión del nivel.
+        const float current_floor = find_floor(
+            g_player_pos.x,
+            g_player_pos.y + 2.0f,
+            g_player_pos.z
+        );
+        const float wanted_floor = find_floor(
+            wanted_x,
+            g_player_pos.y + PLAYER_MAX_STEP_HEIGHT + 2.0f,
+            wanted_z
+        );
+
+        if (current_floor > -1e8f &&
+            wanted_floor > -1e8f &&
+            wanted_floor > current_floor + 0.01f &&
+            wanted_floor - current_floor <= PLAYER_MAX_STEP_HEIGHT + 0.001f) {
+            g_player_pos.x = wanted_x;
+            g_player_pos.z = wanted_z;
+            g_player_pos.y = wanted_floor;
+            g_vel_y = 0.0f;
+            g_on_ground = true;
             continue;
         }
 
