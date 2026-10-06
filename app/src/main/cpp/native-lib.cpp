@@ -3449,10 +3449,51 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             }
         }
 
-        /*
-         * --------------------------------------------------------
-         * Render
-         * --------------------------------------------------------
+        // En pose bind, cada globalBone * inverseBind debería ser
+        // aproximadamente identidad. Este diagnóstico no cambia la
+        // renderización y nos permite detectar un desajuste de convención.
+        if (!DEBUG_IDENTITY_SKIN && skin_bone_count > 0) {
+            float max_bind_error = 0.0f;
+            size_t worst_skin_bone = 0;
+            size_t worst_frame = 0;
+
+            for (size_t skin_bone = 0;
+                 skin_bone < skin_bone_count &&
+                 skin_bone < 96;
+                 ++skin_bone) {
+                size_t frame_index = skin_bone;
+                if (skin_bone <
+                    g_cash_model.skin_bone_to_frame.size()) {
+                    frame_index =
+                        g_cash_model.skin_bone_to_frame[skin_bone];
+                }
+                if (frame_index >= 96 ||
+                    frame_index >= g_cash_model.bones.size()) {
+                    continue;
+                }
+
+                const Mat4 ident = mat4_identity();
+                for (int j = 0; j < 16; ++j) {
+                    const float err =
+                        fabsf(skin_matrices[skin_bone].m[j] -
+                              ident.m[j]);
+                    if (err > max_bind_error) {
+                        max_bind_error = err;
+                        worst_skin_bone = skin_bone;
+                        worst_frame = frame_index;
+                    }
+                }
+            }
+
+            LOGI(
+                "SKIN BIND CHECK: maxError=%.6f skinBone=%zu frame=%zu",
+                max_bind_error,
+                worst_skin_bone,
+                worst_frame
+            );
+        }
+
+
          */
         Vec3 center_pos = vec3_add(
             g_player_pos,
