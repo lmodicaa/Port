@@ -92,6 +92,13 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                                 uint32_t nodeIdx = r.read<uint32_t>();
                                 r.read<uint32_t>(); // flags
                                 model.bone_id_to_index[nodeId] = nodeIdx;
+
+                                // HAnim nodeIdx identifies the FrameList node.
+                                // Preserve the real bone ID on that frame so
+                                // animation tracks can resolve it later.
+                                if (nodeIdx < model.bones.size()) {
+                                    model.bones[nodeIdx].bone_id = nodeId;
+                                }
                             }
                         } else {
                             // HAnim Node (un frame individual)
@@ -378,8 +385,17 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
         }
         LOGI("Validacion Skin: %zu matrices de skin. %zu frames mapeados a skin.", skinCount, framesWithSkin);
     }
-    // Normalizar pesos para evitar distorsiones
+    // Normalizar pesos y eliminar referencias a matrices inexistentes.
+    const size_t skinCount = model.inverse_bind_matrices.size() / 16;
     for (auto& v : model.vertices) {
+        for (int j = 0; j < 4; ++j) {
+            if (skinCount == 0 ||
+                static_cast<size_t>(v.bone_indices[j]) >= skinCount) {
+                v.bone_indices[j] = 0;
+                v.bone_weights[j] = 0.0f;
+            }
+        }
+
         float sum = v.bone_weights[0] + v.bone_weights[1] + v.bone_weights[2] + v.bone_weights[3];
         if (sum > 0.0f) {
             if (std::abs(sum - 1.0f) > 0.001f) {
