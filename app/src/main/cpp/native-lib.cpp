@@ -1573,27 +1573,22 @@ void main() {
         tex_color = texture(u_tex, v_uv);
     }
 
-    // Render estable: no usar todavía los datos de iluminación del BSP,
-    // porque el parser del RW_WORLD aún no está verificado.
-    vec4 base = tex_color * v_color;
+    // RenderWare: textura * color de vértice * color del material.
+    vec4 base = tex_color * v_color * u_mat_color;
 
     if (base.a < 0.1) discard;
 
-    float fog_start = 10.0;
-    float fog_end = 45.0;
-    float fog_factor = clamp(
-        (fog_end - v_dist) / (fog_end - fog_start),
-        0.0,
-        1.0
-    );
+    vec3 normal = normalize(v_normal);
+    vec3 light_dir = normalize(u_light_dir);
+    float ndotl = max(dot(normal, -light_dir), 0.0);
 
-    vec3 final_color = base.rgb;
-    vec3 fog_color = vec3(0.0);
+    vec3 ambient = u_world_ambient.rgb * u_mat_ambient;
+    vec3 directional = u_dir_ambient.rgb * (ndotl * u_mat_diffuse);
+    vec3 lighting = clamp(ambient + directional, 0.0, 1.0);
 
-    frag_color = vec4(
-        mix(fog_color, final_color, fog_factor),
-        base.a
-    );
+    // No usamos una niebla negra fija: 10..45 era un fallback inventado
+    // y cambiaba la imagen respecto del PC.
+    frag_color = vec4(base.rgb * lighting, base.a);
 })";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
