@@ -4398,9 +4398,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
         g_turn_anim = nullptr;
     } else {
         g_turn_gesture_amount += fabsf(dx * SENS);
-        if (!g_turn_gesture_active && g_turn_gesture_amount >= 0.20f) {
+        if (!g_turn_gesture_active && g_turn_gesture_amount >= 0.01f) {
             g_turn_gesture_active = true;
-            const char* wanted = dx > 0.0f ? "Stand_Turn_Right" : "Stand_Turn_Left";
+            const char* wanted = dx > 0.0f ? "Stand_Turn_Right" : "Stand_Turn";
             const std::string query = to_lower(wanted);
             g_turn_anim = nullptr;
             for (const auto& pair : g_anims) {
@@ -4408,6 +4408,11 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
                     g_turn_anim = &pair.second;
                     break;
                 }
+            }
+            if (g_turn_anim) {
+                LOGI("TURN GESTURE: dx=%.3f anim=%s", dx, g_turn_anim->name.c_str());
+            } else {
+                LOGI("TURN GESTURE: dx=%.3f anim=%s NOT FOUND", dx, wanted);
             }
         }
     }
