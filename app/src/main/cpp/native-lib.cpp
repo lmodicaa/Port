@@ -3189,266 +3189,11 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             if (animation_time < 0.0f)
                 animation_time += anim->duration;
         }
-        // ------------------------------------------------------------
-        // Resolver automáticamente la convención de Skin en bind pose.
-        // ------------------------------------------------------------
-        if (g_cash_skin_convention < 0 &&
-            !g_cash_model.inverse_bind_matrices.empty() &&
-            !g_cash_model.bones.empty() &&
-            g_debug_anim_idx == -1) {
-
-            Mat4 candidate_globals[4][96];
-
-            auto make_bind_local = [&](size_t idx,
-                                       bool transpose_rot) -> Mat4 {
-                const DFFBone& b = g_cash_model.bones[idx];
-                Mat4 m = mat4_identity();
-
-                if (!transpose_rot) {
-                    m.m[0] = b.rot_mat[0];
-                    m.m[1] = b.rot_mat[1];
-                    m.m[2] = b.rot_mat[2];
-                    m.m[4] = b.rot_mat[3];
-                    m.m[5] = b.rot_mat[4];
-                    m.m[6] = b.rot_mat[5];
-                    m.m[8] = b.rot_mat[6];
-                    m.m[9] = b.rot_mat[7];
-                    m.m[10] = b.rot_mat[8];
-                } else {
-                    m.m[0] = b.rot_mat[0];
-                    m.m[1] = b.rot_mat[3];
-                    m.m[2] = b.rot_mat[6];
-                    m.m[4] = b.rot_mat[1];
-                    m.m[5] = b.rot_mat[4];
-                    m.m[6] = b.rot_mat[7];
-                    m.m[8] = b.rot_mat[2];
-                    m.m[9] = b.rot_mat[5];
-                    m.m[10] = b.rot_mat[8];
-                }
-
-                m.m[12] = b.pos_x;
-                m.m[13] = b.pos_y;
-                m.m[14] = b.pos_z;
-                return m;
-            };
-
-            auto build_globals = [&](Mat4* out,
-                                     bool transpose_rot,
-                                     bool local_parent_first) {
-                for (int i = 0; i < 96; ++i) {
-                    out[i] = mat4_identity();
-                }
-
-                int state[96] = {};
-                auto visit = [&](auto&& self, size_t idx) -> void {
-                    if (idx >= g_cash_model.bones.size() ||
-                        idx >= 96) {
-                        return;
-                    }
-
-                    if (state[idx] == 2) {
-                        return;
-                    }
-
-                    const Mat4 local =
-                        make_bind_local(idx, transpose_rot);
-
-                    if (state[idx] == 1) {
-                        out[idx] = local;
-                        state[idx] = 2;
-                        return;
-                    }
-
-                    state[idx] = 1;
-                    const uint32_t parent =
-                        g_cash_model.bones[idx].parent;
-
-                    if (parent != 0xFFFFFFFF &&
-                        parent < g_cash_model.bones.size() &&
-                        parent < 96 &&
-                        parent != idx) {
-                        self(self, static_cast<size_t>(parent));
-
-                        if (local_parent_first) {
-                            out[idx] =
-                                mat4_mul(local, out[parent]);
-                        } else {
-                            out[idx] =
-                                mat4_mul(out[parent], local);
-                        }
-                    } else {
-                        out[idx] = local;
-                    }
-
-                    state[idx] = 2;
-                };
-
-                for (size_t i = 0;
-                     i < g_cash_model.bones.size() &&
-                     i < 96;
-                     ++i) {
-                    visit(visit, i);
-                }
-            };
-
-            build_globals(candidate_globals[0], false, false);
-            build_globals(candidate_globals[1], true,  false);
-            build_globals(candidate_globals[2], false, true);
-            build_globals(candidate_globals[3], true,  true);
-
-            const size_t skin_bone_count =
-                g_cash_model.inverse_bind_matrices.size() / 16;
-
-            auto transpose_matrix = [](const Mat4& src) -> Mat4 {
-                Mat4 dst = {0};
-                for (int row = 0; row < 4; ++row) {
-                    for (int col = 0; col < 4; ++col) {
-                        dst.m[col * 4 + row] =
-                            src.m[row * 4 + col];
-                    }
-                }
-                return dst;
-            };
-
-            float best_score = 1e30f;
-            float best_max_error = 1e30f;
-            int best_convention = 0;
-
-            for (int frame_mode = 0; frame_mode < 4; ++frame_mode) {
-                for (int remap = 0; remap < 2; ++remap) {
-                    for (int inv_transpose = 0;
-                         inv_transpose < 2;
-                         ++inv_transpose) {
-                        for (int inv_first = 0;
-                             inv_first < 2;
-                             ++inv_first) {
-
-                            float sum_error = 0.0f;
-                            float max_error = 0.0f;
-                            size_t sample_count = 0;
-
-                            for (size_t skin_bone = 0;
-                                 skin_bone < skin_bone_count &&
-                                 skin_bone < 96;
-                                 ++skin_bone) {
-
-                                size_t frame_index = skin_bone;
-
-                                if (remap &&
-                                    skin_bone <
-                                    g_cash_model
-                                        .skin_bone_to_frame.size()) {
-                                    frame_index =
-                                        g_cash_model
-                                            .skin_bone_to_frame[
-                                                skin_bone
-                                            ];
-                                }
-
-                                if (frame_index >=
-                                    g_cash_model.bones.size() ||
-                                    frame_index >= 96) {
-                                    continue;
-                                }
-
-                                Mat4 inverse_bind;
-                                for (int j = 0; j < 16; ++j) {
-                                    inverse_bind.m[j] =
-                                        g_cash_model
-                                            .inverse_bind_matrices[
-                                                skin_bone * 16 + j
-                                            ];
-                                }
-
-                                if (inv_transpose) {
-                                    inverse_bind =
-                                        transpose_matrix(
-                                            inverse_bind
-                                        );
-                                }
-
-                                const Mat4 skin =
-                                    inv_first
-                                    ? mat4_mul(
-                                        inverse_bind,
-                                        candidate_globals[
-                                            frame_mode
-                                        ][frame_index]
-                                    )
-                                    : mat4_mul(
-                                        candidate_globals[
-                                            frame_mode
-                                        ][frame_index],
-                                        inverse_bind
-                                    );
-
-                                float matrix_error = 0.0f;
-                                for (int j = 0; j < 16; ++j) {
-                                    const float target =
-                                        (j == 0 || j == 5 ||
-                                         j == 10 || j == 15)
-                                        ? 1.0f : 0.0f;
-                                    const float err =
-                                        fabsf(
-                                            skin.m[j] - target
-                                        );
-                                    matrix_error += err;
-                                    max_error =
-                                        std::max(
-                                            max_error,
-                                            err
-                                        );
-                                }
-
-                                sum_error += matrix_error;
-                                ++sample_count;
-                            }
-
-                            if (sample_count == 0) {
-                                continue;
-                            }
-
-                            const float average_error =
-                                sum_error /
-                                static_cast<float>(
-                                    sample_count
-                                );
-                            const float score =
-                                average_error +
-                                max_error * 0.25f;
-
-                            const int convention =
-                                ((frame_mode & 1) ? 1 : 0) |
-                                ((frame_mode & 2) ? 2 : 0) |
-                                (remap ? 4 : 0) |
-                                (inv_transpose ? 8 : 0) |
-                                (inv_first ? 16 : 0);
-
-                            if (score < best_score) {
-                                best_score = score;
-                                best_max_error = max_error;
-                                best_convention = convention;
-                            }
-                        }
-                    }
-                }
-            }
-
-            g_cash_skin_convention = best_convention;
-
-            LOGI(
-                "SKIN CONVENTION: mode=%d score=%.6f max=%.6f "
-                "frameT=%d localParent=%d remap=%d invT=%d invFirst=%d",
-                g_cash_skin_convention,
-                best_score,
-                best_max_error,
-                (g_cash_skin_convention & 1) ? 1 : 0,
-                (g_cash_skin_convention & 2) ? 1 : 0,
-                (g_cash_skin_convention & 4) ? 1 : 0,
-                (g_cash_skin_convention & 8) ? 1 : 0,
-                (g_cash_skin_convention & 16) ? 1 : 0
-            );
-        }
+        // Skin usa el orden HAnim y la fórmula de RenderWare/librw:
+        // inverseAtomic * hierarchyMatrix * inverseBind.
+        // HAnim node -> FrameList se resolvió durante la carga del DFF.
+        // 100 = remap + inverseAtomic + inverseAtomic antes del hueso.
+        g_cash_skin_convention = 100;
 
         /*
          * --------------------------------------------------------
@@ -3790,34 +3535,35 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         }
 
         // ------------------------------------------------------------
-        // Construir la palette Skin con la convención seleccionada.
+        // Construir la palette Skin.
+        // RenderWare/librw:
+        //   skin = inverseAtomic * hierarchyMatrix * inverseBind
         // ------------------------------------------------------------
         const size_t skin_bone_count =
             g_cash_model.inverse_bind_matrices.size() / 16;
 
         const bool skin_use_remap =
-            (g_cash_skin_convention & 4) != 0;
-        const bool skin_inv_transpose =
-            (g_cash_skin_convention & 8) != 0;
-        const bool skin_inv_first =
-            (g_cash_skin_convention & 16) != 0;
+            true;
 
-        auto transpose_skin_matrix =
-            [](const Mat4& src) -> Mat4 {
-                Mat4 dst = {0};
-                for (int row = 0; row < 4; ++row) {
-                    for (int col = 0; col < 4; ++col) {
-                        dst.m[col * 4 + row] =
-                            src.m[row * 4 + col];
-                    }
-                }
-                return dst;
-            };
+        Mat4 atomic_inverse = mat4_identity();
+
+        if (g_cash_model.atomic_frame_index <
+            g_cash_model.bones.size() &&
+            g_cash_model.atomic_frame_index < 96) {
+
+            atomic_inverse =
+                mat4_inverse_rigid(
+                    global_bones[
+                        g_cash_model.atomic_frame_index
+                    ]
+                );
+        }
 
         for (size_t skin_bone = 0;
              skin_bone < skin_bone_count &&
              skin_bone < 96;
              ++skin_bone) {
+
             size_t frame_index = skin_bone;
 
             if (skin_use_remap &&
@@ -3829,87 +3575,84 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                     ];
             }
 
-            if (frame_index >= g_cash_model.bones.size() ||
+            if (frame_index >=
+                g_cash_model.bones.size() ||
                 frame_index >= 96) {
                 continue;
             }
 
             Mat4 inverse_bind;
+
             for (int j = 0; j < 16; ++j) {
                 inverse_bind.m[j] =
-                    g_cash_model.inverse_bind_matrices[
-                        skin_bone * 16 + j
-                    ];
+                    g_cash_model
+                        .inverse_bind_matrices[
+                            skin_bone * 16 + j
+                        ];
             }
 
-            if (skin_inv_transpose) {
-                inverse_bind =
-                    transpose_skin_matrix(inverse_bind);
-            }
+            const Mat4 hierarchy_relative =
+                mat4_mul(
+                    atomic_inverse,
+                    global_bones[frame_index]
+                );
 
-            if (skin_inv_first) {
-                skin_matrices[skin_bone] =
-                    mat4_mul(
-                        inverse_bind,
-                        global_bones[frame_index]
-                    );
-            } else {
-                skin_matrices[skin_bone] =
-                    mat4_mul(
-                        global_bones[frame_index],
-                        inverse_bind
-                    );
-            }
+            skin_matrices[skin_bone] =
+                mat4_mul(
+                    hierarchy_relative,
+                    inverse_bind
+                );
         }
 
-        // Imprime el error de la convención ya elegida.
-        if (skin_bone_count > 0 &&
-            g_cash_skin_convention >= 0) {
-            float max_bind_error = 0.0f;
-            float sum_bind_error = 0.0f;
-            size_t samples = 0;
+        static bool logged_skin_bind = false;
+
+        if (!logged_skin_bind &&
+            skin_bone_count > 0) {
+
+            float max_error = 0.0f;
+            float avg_error = 0.0f;
+            size_t count = 0;
 
             for (size_t skin_bone = 0;
                  skin_bone < skin_bone_count &&
                  skin_bone < 96;
                  ++skin_bone) {
-                float matrix_error = 0.0f;
+
+                float e = 0.0f;
+
                 for (int j = 0; j < 16; ++j) {
                     const float target =
                         (j == 0 || j == 5 ||
                          j == 10 || j == 15)
                         ? 1.0f : 0.0f;
 
-                    matrix_error += fabsf(
-                        skin_matrices[skin_bone].m[j] -
-                        target
+                    e += fabsf(
+                        skin_matrices[
+                            skin_bone
+                        ].m[j] - target
                     );
                 }
 
-                sum_bind_error += matrix_error;
-                max_bind_error =
-                    std::max(
-                        max_bind_error,
-                        matrix_error
-                    );
-                ++samples;
+                avg_error += e;
+                max_error =
+                    std::max(max_error, e);
+                ++count;
             }
 
-            static bool logged_bind_check = false;
-            if (!logged_bind_check) {
-                LOGI(
-                    "SKIN SELECTED CHECK: avg=%.6f max=%.6f "
-                    "samples=%zu mode=%d",
-                    samples
-                        ? sum_bind_error /
-                          static_cast<float>(samples)
-                        : 0.0f,
-                    max_bind_error,
-                    samples,
-                    g_cash_skin_convention
-                );
-                logged_bind_check = true;
-            }
+            LOGI(
+                "SKIN REAL CHECK: avg=%.6f max=%.6f "
+                "bones=%zu atomicFrame=%u remap=%zu",
+                count
+                    ? avg_error /
+                      static_cast<float>(count)
+                    : 0.0f,
+                max_error,
+                skin_bone_count,
+                g_cash_model.atomic_frame_index,
+                g_cash_model.skin_bone_to_frame.size()
+            );
+
+            logged_skin_bind = true;
         }
 
         Vec3 center_pos = vec3_add(
