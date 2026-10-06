@@ -145,68 +145,10 @@ class MainActivity : Activity() {
     private fun setupCashCalibrationPanel() {
         val panel = findViewById<android.view.View>(R.id.cash_calibration_panel)
         val toggle = findViewById<Button>(R.id.btn_adjust)
-        val reset = findViewById<Button>(R.id.btn_reset_adjust)
-        val copy = findViewById<Button>(R.id.btn_copy_adjust)
         val aimSensitivity = findViewById<SeekBar>(R.id.seek_aim_sensitivity)
         val aimSensitivityLabel = findViewById<TextView>(R.id.lbl_aim_sensitivity)
 
-        val labels = arrayOf(
-            findViewById<TextView>(R.id.lbl_pos_x),
-            findViewById<TextView>(R.id.lbl_pos_y),
-            findViewById<TextView>(R.id.lbl_pos_z),
-            findViewById<TextView>(R.id.lbl_rot_x),
-            findViewById<TextView>(R.id.lbl_rot_y),
-            findViewById<TextView>(R.id.lbl_rot_z)
-        )
-
-        val bars = arrayOf(
-            findViewById<SeekBar>(R.id.seek_pos_x),
-            findViewById<SeekBar>(R.id.seek_pos_y),
-            findViewById<SeekBar>(R.id.seek_pos_z),
-            findViewById<SeekBar>(R.id.seek_rot_x),
-            findViewById<SeekBar>(R.id.seek_rot_y),
-            findViewById<SeekBar>(R.id.seek_rot_z)
-        )
-
-        var posX = 0f
-        var posY = 1f
-        var posZ = 0f
-        var rotX = 0f
-        var rotY = -91f
-        var rotZ = 180f
-
-        fun apply() {
-            renderer.nativeSetCashTransform(
-                posX, posY, posZ,
-                rotX, rotY, rotZ
-            )
-
-            labels[0].text = "Pos X: %+.2f m".format(posX)
-            labels[1].text = "Pos Y: %+.2f m".format(posY)
-            labels[2].text = "Pos Z: %+.2f m".format(posZ)
-            labels[3].text = "Rot X: %+.0f°".format(rotX)
-            labels[4].text = "Rot Y: %+.0f°".format(rotY)
-            labels[5].text = "Rot Z: %+.0f°".format(rotZ)
-        }
-
-        fun refreshFromBars() {
-            posX = (bars[0].progress - 300) / 100f
-            posY = (bars[1].progress - 300) / 100f
-            posZ = (bars[2].progress - 300) / 100f
-            rotX = (bars[3].progress - 180).toFloat()
-            rotY = (bars[4].progress - 180).toFloat()
-            rotZ = (bars[5].progress - 180).toFloat()
-            apply()
-        }
-
-        bars.forEach { bar ->
-            bar.setOnSeekBarChangeListener(
-                simpleSeekListener { refreshFromBars() }
-            )
-        }
-
         fun refreshAimSensitivity() {
-            // 1..30: más a la derecha = más sensibilidad.
             val level = aimSensitivity.progress.coerceIn(1, 30)
             touchAimDistance = 42f - (level - 1) * (36f / 29f)
             val sensitivity = 14f / touchAimDistance
@@ -226,43 +168,6 @@ class MainActivity : Activity() {
                 else
                     android.view.View.VISIBLE
         }
-
-        reset.setOnClickListener {
-            bars.forEachIndexed { index, bar ->
-                bar.progress = when (index) {
-                    0, 1, 2, 3 -> if (index < 3) 300 else 180
-                    4 -> 89
-                    5 -> 360
-                    else -> 180
-                }
-            }
-            refreshFromBars()
-        }
-
-        copy.setOnClickListener {
-            val values =
-                "Pos X=${"%.2f".format(posX)}, " +
-                "Pos Y=${"%.2f".format(posY)}, " +
-                "Pos Z=${"%.2f".format(posZ)}, " +
-                "Rot X=${"%.0f".format(rotX)}°, " +
-                "Rot Y=${"%.0f".format(rotY)}°, " +
-                "Rot Z=${"%.0f".format(rotZ)}°"
-            val clipboard =
-                getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(
-                ClipData.newPlainText("Cash transform", values)
-            )
-            Toast.makeText(this, "Valores copiados", Toast.LENGTH_SHORT).show()
-        }
-
-        // Valores finales de calibración.
-        bars[0].progress = 300
-        bars[1].progress = 400
-        bars[2].progress = 300
-        bars[3].progress = 180
-        bars[4].progress = 89
-        bars[5].progress = 360
-        refreshFromBars()
     }
 
     private fun simpleSeekListener(onChanged: () -> Unit) =
