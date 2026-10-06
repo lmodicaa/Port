@@ -49,7 +49,7 @@ struct WorldLighting {
 // Geometría completa extraída del DFF
 struct DFFModel {
     std::vector<DFFVertex> vertices;
-    std::vector<std::vector<uint16_t>> indices_by_mat;
+    std::vector<std::vector<uint32_t>> indices_by_mat;
     std::vector<std::string> material_textures;
     std::vector<MaterialData> materials;      // datos completos de material
     WorldLighting world;                      // sólo poblado por bsp_load()

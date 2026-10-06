@@ -132,7 +132,9 @@ struct RenderGroup {
     GLuint ebo;
     int num_indices;
     GLuint texture_id;
+    MaterialData material;
 };
+static WorldLighting g_world_lighting;
 
 static AAssetManager* g_assets   = nullptr;
 static std::string    g_base_path = "";
@@ -178,7 +180,39 @@ static const float MOVE_SPEED     = 10.0f;
 
 // Triángulos del BSP para colisión de suelo
 struct Tri { Vec3 a, b, c; };
-static std::vector<Tri> g_collision_tris;
+
+struct CollisionGrid {
+    float cell_size = 5.0f;
+    std::map<std::pair<int, int>, std::vector<Tri>> cells;
+    
+    void add(const Tri& t) {
+        float min_x = std::min({t.a.x, t.b.x, t.c.x});
+        float max_x = std::max({t.a.x, t.b.x, t.c.x});
+        float min_z = std::min({t.a.z, t.b.z, t.c.z});
+        float max_z = std::max({t.a.z, t.b.z, t.c.z});
+        
+        int cx1 = (int)std::floor(min_x / cell_size);
+        int cx2 = (int)std::floor(max_x / cell_size);
+        int cz1 = (int)std::floor(min_z / cell_size);
+        int cz2 = (int)std::floor(max_z / cell_size);
+        
+        for (int cx = cx1; cx <= cx2; ++cx) {
+            for (int cz = cz1; cz <= cz2; ++cz) {
+                cells[{cx, cz}].push_back(t);
+            }
+        }
+    }
+    
+    const std::vector<Tri>* get(float x, float z) const {
+        int cx = (int)std::floor(x / cell_size);
+        int cz = (int)std::floor(z / cell_size);
+        auto it = cells.find({cx, cz});
+        if (it != cells.end()) return &it->second;
+        return nullptr;
+    }
+};
+
+static CollisionGrid g_col_grid;
 static std::vector<EntityInst> g_insts;
 #include <map>
 static std::map<std::string, DFFModel> g_models;
@@ -206,7 +240,7 @@ static void upload_dff_to_gpu(const DFFModel& model, ModelRenderData& rd) {
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(DFFVertex), (void*)offsetof(DFFVertex, r));
     glEnableVertexAttribArray(3);
-    glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(DFFVertex), (void*)offsetof(DFFVertex, bone_indices));
+    glVertexAttribIPointer(4, 4, GL_UNSIGNED_BYTE, sizeof(DFFVertex), (void*)offsetof(DFFVertex, bone_indices));
     glEnableVertexAttribArray(4);
     glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(DFFVertex), (void*)offsetof(DFFVertex, bone_weights));
     glEnableVertexAttribArray(5);
@@ -216,12 +250,13 @@ static void upload_dff_to_gpu(const DFFModel& model, ModelRenderData& rd) {
         RenderGroup g;
         glGenBuffers(1, &g.ebo);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g.ebo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indices_by_mat[i].size() * sizeof(uint16_t), model.indices_by_mat[i].data(), GL_STATIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indices_by_mat[i].size() * sizeof(uint32_t), model.indices_by_mat[i].data(), GL_STATIC_DRAW);
         g.num_indices = model.indices_by_mat[i].size();
         
         std::string tex_name = "";
         if (i < model.material_textures.size()) tex_name = model.material_textures[i];
         g.texture_id = get_texture(tex_name);
+        if (i < model.materials.size()) g.material = model.materials[i];
         
         rd.groups.push_back(g);
     }
@@ -234,7 +269,7 @@ layout(location=0) in vec3 a_pos;
 layout(location=1) in vec2 a_uv;
 layout(location=2) in vec3 a_normal;
 layout(location=3) in vec4 a_color;
-layout(location=4) in vec4 a_bone_idx;
+layout(location=4) in uvec4 a_bone_idx;
 layout(location=5) in vec4 a_bone_weight;
 
 uniform mat4 u_mvp;
@@ -245,9 +280,11 @@ uniform int u_skinned;
 out vec2  v_uv;
 out vec4  v_color;
 out float v_dist;
+out vec3  v_normal;
 
 void main() {
     vec4 local_pos = vec4(a_pos, 1.0);
+    vec3 local_normal = a_normal;
     
     if (u_skinned == 1) {
         mat4 bone_transform =
@@ -256,6 +293,7 @@ void main() {
             u_bone_matrices[clamp(int(a_bone_idx.z), 0, 95)] * a_bone_weight.z +
             u_bone_matrices[clamp(int(a_bone_idx.w), 0, 95)] * a_bone_weight.w;
         local_pos = bone_transform * local_pos;
+        local_normal = mat3(bone_transform) * local_normal;
     }
     
     vec4 pos = u_mvp * local_pos;
@@ -263,6 +301,7 @@ void main() {
     v_uv = a_uv;
     v_color = a_color;
     v_dist = pos.w;
+    v_normal = normalize(mat3(u_model) * local_normal);
 })";
 
 // Fragment: texturas + colores de vértices + niebla negra (Manhunt style)
@@ -271,11 +310,39 @@ precision mediump float;
 in vec2  v_uv;
 in vec4  v_color;
 in float v_dist;
+in vec3  v_normal;
+
 uniform sampler2D u_tex;
+uniform int u_has_tex;
+
+uniform vec4 u_world_ambient;
+uniform vec4 u_dir_ambient;
+uniform vec3 u_light_dir;
+
+uniform vec4 u_mat_color;
+uniform float u_mat_ambient;
+uniform float u_mat_diffuse;
+
 out vec4 frag_color;
+
 void main() {
-    vec4 col = texture(u_tex, v_uv) * v_color;
-    if(col.a < 0.1) discard;
+    vec4 tex_color = vec4(1.0);
+    if (u_has_tex == 1) {
+        tex_color = texture(u_tex, v_uv);
+    }
+    
+    vec4 base = tex_color * v_color * u_mat_color;
+    if(base.a < 0.1) discard;
+    
+    // Iluminacion
+    vec3 n = normalize(v_normal);
+    vec3 l = normalize(-u_light_dir);
+    float diff = max(dot(n, l), 0.0);
+    
+    vec3 ambient_light = u_world_ambient.rgb * u_mat_ambient;
+    vec3 diffuse_light = u_dir_ambient.rgb * diff * u_mat_diffuse;
+    
+    vec3 final_color = base.rgb * (ambient_light + diffuse_light);
     
     // Niebla negra (Manhunt usa oscuridad para esconder el mapa)
     float fog_start = 10.0;
@@ -283,7 +350,7 @@ void main() {
     float fog_factor = clamp((fog_end - v_dist) / (fog_end - fog_start), 0.0, 1.0);
     vec3 fog_color = vec3(0.0, 0.0, 0.0);
     
-    frag_color = vec4(mix(fog_color, col.rgb, fog_factor), col.a);
+    frag_color = vec4(mix(fog_color, final_color, fog_factor), base.a);
 })";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -332,7 +399,10 @@ static float find_floor(float px, float search_y, float pz) {
     Vec3 ray_o  = {px, search_y, pz};
     Vec3 ray_d  = {0, -1, 0};  // raycast hacia abajo
 
-    for (const auto& tri : g_collision_tris) {
+    const std::vector<Tri>* tris = g_col_grid.get(px, pz);
+    if (!tris) return best;
+
+    for (const auto& tri : *tris) {
         Vec3 e1 = {tri.b.x-tri.a.x, tri.b.y-tri.a.y, tri.b.z-tri.a.z};
         Vec3 e2 = {tri.c.x-tri.a.x, tri.c.y-tri.a.y, tri.c.z-tri.a.z};
         
@@ -369,7 +439,11 @@ static bool hit_wall(float x1, float y1, float z1, float x2, float y2, float z2)
     if (dist < 0.001f) return false;
     ray_d.x /= dist; ray_d.y /= dist; ray_d.z /= dist;
 
-    for (const auto& tri : g_collision_tris) {
+    // We check the cell based on the start position (sufficient for small movements)
+    const std::vector<Tri>* tris = g_col_grid.get(x1, z1);
+    if (!tris) return false;
+
+    for (const auto& tri : *tris) {
         Vec3 e1 = {tri.b.x-tri.a.x, tri.b.y-tri.a.y, tri.b.z-tri.a.z};
         Vec3 e2 = {tri.c.x-tri.a.x, tri.c.y-tri.a.y, tri.c.z-tri.a.z};
         
@@ -436,22 +510,26 @@ static void setup_model() {
         return;
     }
 
+    g_world_lighting = model.world;
+
     // Construir triángulos de colisión desde todos los vértices del modelo
-    g_collision_tris.clear();
+    g_col_grid.cells.clear();
+    int tris_count = 0;
     for (const auto& mat_idx_list : model.indices_by_mat) {
         for (size_t i = 0; i + 2 < mat_idx_list.size(); i += 3) {
-            uint16_t ia = mat_idx_list[i];
-            uint16_t ib = mat_idx_list[i+1];
-            uint16_t ic = mat_idx_list[i+2];
+            uint32_t ia = mat_idx_list[i];
+            uint32_t ib = mat_idx_list[i+1];
+            uint32_t ic = mat_idx_list[i+2];
             if (ia >= model.vertices.size() || ib >= model.vertices.size() || ic >= model.vertices.size()) continue;
             Tri t;
             t.a = {model.vertices[ia].x, model.vertices[ia].y, model.vertices[ia].z};
             t.b = {model.vertices[ib].x, model.vertices[ib].y, model.vertices[ib].z};
             t.c = {model.vertices[ic].x, model.vertices[ic].y, model.vertices[ic].z};
-            g_collision_tris.push_back(t);
+            g_col_grid.add(t);
+            tris_count++;
         }
     }
-    LOGI("Triángulos de colisión: %zu", g_collision_tris.size());
+    LOGI("Triángulos de colisión (Grid): %d", tris_count);
 
     // VAO/VBO
     glGenVertexArrays(1, &g_vao);
@@ -474,6 +552,10 @@ static void setup_model() {
     // a_color (location 3): vec4 uint8 @ offset 32
     glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(DFFVertex), (void*)offsetof(DFFVertex, r));
     glEnableVertexAttribArray(3);
+    glVertexAttribIPointer(4, 4, GL_UNSIGNED_BYTE, sizeof(DFFVertex), (void*)offsetof(DFFVertex, bone_indices));
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(DFFVertex), (void*)offsetof(DFFVertex, bone_weights));
+    glEnableVertexAttribArray(5);
 
     g_groups.clear();
     for (size_t i = 0; i < model.indices_by_mat.size(); i++) {
@@ -481,11 +563,12 @@ static void setup_model() {
         GLuint ebo;
         glGenBuffers(1, &ebo);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indices_by_mat[i].size() * sizeof(uint16_t), model.indices_by_mat[i].data(), GL_STATIC_DRAW);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indices_by_mat[i].size() * sizeof(uint32_t), model.indices_by_mat[i].data(), GL_STATIC_DRAW);
         RenderGroup group;
         group.ebo = ebo;
         group.num_indices = (int)model.indices_by_mat[i].size();
         group.texture_id = (GLuint)i;
+        if (i < model.materials.size()) group.material = model.materials[i];
         g_groups.push_back(group);
     }
     glBindVertexArray(0);
@@ -719,16 +802,40 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     glUniform1i(glGetUniformLocation(g_program, "u_skinned"), 0);
     glUniform1i(glGetUniformLocation(g_program, "u_tex"), 0);
 
+    GLint loc_has_tex = glGetUniformLocation(g_program, "u_has_tex");
+    GLint loc_mat_color = glGetUniformLocation(g_program, "u_mat_color");
+    GLint loc_mat_ambient = glGetUniformLocation(g_program, "u_mat_ambient");
+    GLint loc_mat_diffuse = glGetUniformLocation(g_program, "u_mat_diffuse");
+
+    glUniform4fv(glGetUniformLocation(g_program, "u_world_ambient"), 1, g_world_lighting.ambient);
+    glUniform4fv(glGetUniformLocation(g_program, "u_dir_ambient"), 1, g_world_lighting.dir_ambient);
+    glUniform3fv(glGetUniformLocation(g_program, "u_light_dir"), 1, g_world_lighting.light_dir);
+
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(g_vao);
 
     for (const auto& group : g_groups) {
         if (group.texture_id) {
+            glUniform1i(loc_has_tex, 1);
             glBindTexture(GL_TEXTURE_2D, group.texture_id);
+        } else {
+            glUniform1i(loc_has_tex, 0);
         }
+        glUniform4fv(loc_mat_color, 1, group.material.color);
+        glUniform1f(loc_mat_ambient, group.material.ambient);
+        glUniform1f(loc_mat_diffuse, group.material.diffuse);
+        
+        if (group.material.color[3] < 0.99f) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        } else {
+            glDisable(GL_BLEND);
+        }
+
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, group.ebo);
-        glDrawElements(GL_TRIANGLES, group.num_indices, GL_UNSIGNED_SHORT, nullptr);
+        glDrawElements(GL_TRIANGLES, group.num_indices, GL_UNSIGNED_INT, nullptr);
     }
+    glDisable(GL_BLEND);
 
     glBindVertexArray(0);
 
@@ -750,11 +857,26 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             glBindVertexArray(it->second.vao);
             for (const auto& group : it->second.groups) {
                 if (group.texture_id) {
+                    glUniform1i(loc_has_tex, 1);
                     glBindTexture(GL_TEXTURE_2D, group.texture_id);
+                } else {
+                    glUniform1i(loc_has_tex, 0);
                 }
+                glUniform4fv(loc_mat_color, 1, group.material.color);
+                glUniform1f(loc_mat_ambient, group.material.ambient);
+                glUniform1f(loc_mat_diffuse, group.material.diffuse);
+                
+                if (group.material.color[3] < 0.99f) {
+                    glEnable(GL_BLEND);
+                    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                } else {
+                    glDisable(GL_BLEND);
+                }
+
                 glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, group.ebo);
-                glDrawElements(GL_TRIANGLES, group.num_indices, GL_UNSIGNED_SHORT, nullptr);
+                glDrawElements(GL_TRIANGLES, group.num_indices, GL_UNSIGNED_INT, nullptr);
             }
+            glDisable(GL_BLEND);
         }
     }
     
@@ -1166,11 +1288,25 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         );
         for (const auto& group : it_cash->second.groups) {
             if (group.texture_id) {
+                glUniform1i(loc_has_tex, 1);
                 glBindTexture(
                     GL_TEXTURE_2D,
                     group.texture_id
                 );
+            } else {
+                glUniform1i(loc_has_tex, 0);
             }
+            glUniform4fv(loc_mat_color, 1, group.material.color);
+            glUniform1f(loc_mat_ambient, group.material.ambient);
+            glUniform1f(loc_mat_diffuse, group.material.diffuse);
+            
+            if (group.material.color[3] < 0.99f) {
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            } else {
+                glDisable(GL_BLEND);
+            }
+
             glBindBuffer(
                 GL_ELEMENT_ARRAY_BUFFER,
                 group.ebo
@@ -1178,10 +1314,11 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             glDrawElements(
                 GL_TRIANGLES,
                 group.num_indices,
-                GL_UNSIGNED_SHORT,
+                GL_UNSIGNED_INT,
                 nullptr
             );
         }
+        glDisable(GL_BLEND);
     }
     glBindVertexArray(0);
 }

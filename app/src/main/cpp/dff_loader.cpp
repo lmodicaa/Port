@@ -92,13 +92,10 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                                 uint32_t nodeIdx = r.read<uint32_t>();
                                 r.read<uint32_t>(); // flags
                                 model.bone_id_to_index[nodeId] = nodeIdx;
-                                if (nodeCount < 80) {
-                                    LOGI("HAnim frame %u node %u: id=%u idx=%u", i, n, nodeId, nodeIdx);
-                                }
                             }
-                            if (nodeCount >= 80) {
-                                LOGI("HAnim frame %u: %u nodes (truncado)", i, nodeCount);
-                            }
+                        } else {
+                            // HAnim Node (un frame individual)
+                            model.bones[i].bone_id = hanim_id;
                         }
                     }
                     r.pos = plug_payload_end; // avanzar al fin del payload (evita doble-avance)
@@ -106,28 +103,20 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                 r.pos = ext_end; // fix any bad size reading
             }
 
-            // Mapear bone_id a cada frame invirtiendo bone_id_to_index
-            // (HAnim nodeIdx suele ser el índice del frame en el FrameList).
-            {
-                std::map<uint32_t, uint32_t> frame_to_boneid;
-                for (auto& kv : model.bone_id_to_index) {
-                    // kv.first = boneId, kv.second = frameIdx (supuesto)
-                    if (kv.second < frameCount) {
-                        frame_to_boneid[kv.second] = kv.first;
-                    }
-                }
-                for (uint32_t i = 0; i < frameCount; i++) {
-                    auto it = frame_to_boneid.find(i);
-                    if (it != frame_to_boneid.end()) {
-                        model.bones[i].bone_id = it->second;
+            // Mapear matrix_index usando HAnim Hierarchy
+            for (uint32_t i = 0; i < frameCount; i++) {
+                if (model.bones[i].bone_id != 0xFFFFFFFF) {
+                    auto it = model.bone_id_to_index.find(model.bones[i].bone_id);
+                    if (it != model.bone_id_to_index.end()) {
+                        model.bones[i].matrix_index = it->second;
                     } else {
-                        model.bones[i].bone_id = 0xFFFFFFFF;
+                        model.bones[i].matrix_index = 0xFFFFFFFF;
                     }
-                    // matrix_index se asigna al final (cuando se conozca el Skin boneCount).
-                    model.bones[i].matrix_index = i;
+                } else {
+                    model.bones[i].matrix_index = 0xFFFFFFFF;
                 }
-                LOGI("FrameList: %u frames, %zu nodos HAnim mapeados", frameCount, frame_to_boneid.size());
             }
+            LOGI("FrameList: %u frames. Mapping resuelto con HAnim.", frameCount);
             
             r.pos = frame_end;
             continue;
@@ -208,12 +197,14 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                 float z = r.read<float>();
 
                 if (m == 0) {
-                    DFFVertex v;
+                    DFFVertex v{};
                     v.x  = x; v.y = y; v.z = z;
                     v.u  = uvs[i * 2 + 0];
                     v.v  = uvs[i * 2 + 1];
                     v.nx = 0.f; v.ny = 1.f; v.nz = 0.f;
                     v.r = colors[i*4+0]; v.g = colors[i*4+1]; v.b = colors[i*4+2]; v.a = colors[i*4+3];
+                    v.bone_indices[0] = 0; v.bone_indices[1] = 0; v.bone_indices[2] = 0; v.bone_indices[3] = 0;
+                    v.bone_weights[0] = 1.0f; v.bone_weights[1] = 0.0f; v.bone_weights[2] = 0.0f; v.bone_weights[3] = 0.0f;
                     model.vertices.push_back(v);
                 }
             }
@@ -249,9 +240,27 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                     ChunkHeader mat_hdr = r.read_chunk();
                     if (mat_hdr.type != 0x0007) { r.skip(mat_hdr.size); continue; }
                     size_t mat_end = r.pos + mat_hdr.size;
-                    
+                    model.materials.resize(numMaterials);
                     ChunkHeader mat_struct = r.read_chunk();
-                    r.skip(mat_struct.size);
+                    if (mat_struct.size >= 28) {
+                        r.read<uint32_t>(); // flags
+                        uint8_t r_c = r.read<uint8_t>();
+                        uint8_t g_c = r.read<uint8_t>();
+                        uint8_t b_c = r.read<uint8_t>();
+                        uint8_t a_c = r.read<uint8_t>();
+                        model.materials[i].color[0] = r_c / 255.f;
+                        model.materials[i].color[1] = g_c / 255.f;
+                        model.materials[i].color[2] = b_c / 255.f;
+                        model.materials[i].color[3] = a_c / 255.f;
+                        r.read<uint32_t>(); // unused
+                        r.read<uint32_t>(); // textured
+                        model.materials[i].ambient = r.read<float>();
+                        model.materials[i].specular = r.read<float>();
+                        model.materials[i].diffuse = r.read<float>();
+                        if (mat_struct.size > 28) r.skip(mat_struct.size - 28);
+                    } else {
+                        r.skip(mat_struct.size);
+                    }
                     
                     while (r.pos < mat_end) {
                         ChunkHeader th = r.read_chunk();
@@ -299,21 +308,22 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                             }
                         }
                         
+                        size_t vertex_offset = model.vertices.size() - numVertices;
                         for (uint32_t i = 0; i < numVertices; i++) {
                             for (int j = 0; j < 4; j++) {
                                 uint8_t idx = r.read<uint8_t>();
                                 if (usedBoneCount > 0 && idx < usedBoneCount) {
-                                    model.vertices[i].bone_indices[j] = usedBoneIndices[idx];
+                                    model.vertices[vertex_offset + i].bone_indices[j] = usedBoneIndices[idx];
                                 } else {
-                                    model.vertices[i].bone_indices[j] = idx;
+                                    model.vertices[vertex_offset + i].bone_indices[j] = idx;
                                 }
                             }
                         }
                         for (uint32_t i = 0; i < numVertices; i++) {
-                            model.vertices[i].bone_weights[0] = r.read<float>();
-                            model.vertices[i].bone_weights[1] = r.read<float>();
-                            model.vertices[i].bone_weights[2] = r.read<float>();
-                            model.vertices[i].bone_weights[3] = r.read<float>();
+                            model.vertices[vertex_offset + i].bone_weights[0] = r.read<float>();
+                            model.vertices[vertex_offset + i].bone_weights[1] = r.read<float>();
+                            model.vertices[vertex_offset + i].bone_weights[2] = r.read<float>();
+                            model.vertices[vertex_offset + i].bone_weights[3] = r.read<float>();
                         }
                         
                         // Inverse Bind Matrices (16 floats / 64 bytes per bone)
@@ -358,30 +368,15 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
         r.pos = geom_end; // Avanzar al final del bloque Geometry completo
     }
 
-    // Ajustar matrix_index según el Skin boneCount:
-    // Típico en Manhunt: frames = skins + 1 (frame 0 = raíz del clump, sin skin).
-    // Entonces skin_idx = frame_idx - 1. Si coinciden, skin_idx = frame_idx.
-    if (!model.bones.empty() && !model.inverse_bind_matrices.empty()) {
+    // matrix_index ya fue asignado usando el HAnim Hierarchy plugin
+    // Validar con el boneCount del Skin Plugin:
+    if (!model.inverse_bind_matrices.empty()) {
         size_t skinCount = model.inverse_bind_matrices.size() / 16;
-        size_t frameCount = model.bones.size();
-        int offset = 0;
-        if (frameCount == skinCount + 1) {
-            offset = 1;
-        } else if (frameCount == skinCount) {
-            offset = 0;
-        } else {
-            // Heurística: si hay más frames que skins, asumir raíz extra.
-            offset = (frameCount > skinCount) ? 1 : 0;
+        size_t framesWithSkin = 0;
+        for (const auto& b : model.bones) {
+            if (b.matrix_index != 0xFFFFFFFF) framesWithSkin++;
         }
-        for (size_t i = 0; i < frameCount; i++) {
-            int skin_idx = (int)i - offset;
-            if (skin_idx >= 0 && (size_t)skin_idx < skinCount) {
-                model.bones[i].matrix_index = (uint32_t)skin_idx;
-            } else {
-                model.bones[i].matrix_index = 0xFFFFFFFF; // sin skin (raíz)
-            }
-        }
-        LOGI("Mapeo frames->skin: frames=%zu skins=%zu offset=%d", frameCount, skinCount, offset);
+        LOGI("Validacion Skin: %zu matrices de skin. %zu frames mapeados a skin.", skinCount, framesWithSkin);
     }
     
     return model;

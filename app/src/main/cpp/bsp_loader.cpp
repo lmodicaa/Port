@@ -93,8 +93,27 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
             ChunkHeader mat_hdr = r.read_chunk();
             if (mat_hdr.type != 0x0007) { r.skip(mat_hdr.size); continue; }
             size_t mat_end = r.pos + mat_hdr.size;
+            model.materials.resize(numMaterials);
             ChunkHeader mat_struct = r.read_chunk();
-            r.skip(mat_struct.size);
+            if (mat_struct.size >= 28) {
+                r.read<uint32_t>(); // flags
+                uint8_t r_c = r.read<uint8_t>();
+                uint8_t g_c = r.read<uint8_t>();
+                uint8_t b_c = r.read<uint8_t>();
+                uint8_t a_c = r.read<uint8_t>();
+                model.materials[i].color[0] = r_c / 255.f;
+                model.materials[i].color[1] = g_c / 255.f;
+                model.materials[i].color[2] = b_c / 255.f;
+                model.materials[i].color[3] = a_c / 255.f;
+                r.read<uint32_t>(); // unused
+                r.read<uint32_t>(); // textured
+                model.materials[i].ambient = r.read<float>();
+                model.materials[i].specular = r.read<float>();
+                model.materials[i].diffuse = r.read<float>();
+                if (mat_struct.size > 28) r.skip(mat_struct.size - 28);
+            } else {
+                r.skip(mat_struct.size);
+            }
             while (r.pos < mat_end) {
                 ChunkHeader th = r.read_chunk();
                 if (th.type == 0x0006) { // Texture
@@ -154,13 +173,15 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
 
                 // 1. Posiciones
                 for (uint32_t i = 0; i < numVert; i++) {
-                    DFFVertex v;
+                    DFFVertex v{};
                     v.x = r.read<float>();
                     v.y = r.read<float>();
                     v.z = r.read<float>();
                     v.u  = 0.f; v.v  = 0.f;
                     v.nx = 0.f; v.ny = 1.f; v.nz = 0.f;
                     v.r = 255; v.g = 255; v.b = 255; v.a = 255;
+                    v.bone_indices[0] = 0; v.bone_indices[1] = 0; v.bone_indices[2] = 0; v.bone_indices[3] = 0;
+                    v.bone_weights[0] = 1.0f; v.bone_weights[1] = 0.0f; v.bone_weights[2] = 0.0f; v.bone_weights[3] = 0.0f;
                     model.vertices.push_back(v);
                 }
 
