@@ -2099,15 +2099,33 @@ static void setup_model() {
             dump_cash_debug(cash_model);
             g_model_render["cash"] = rd;
 
-            // Mantener el personaje visualmente estable mientras
-            // terminamos de validar el mapeo Skin/HAnim.
-            g_cash_skinning_enabled = false;
+            // Skinning habilitado únicamente para esta fase de
+            // validación en pose base. Si la geometría vuelve a romperse,
+            // el siguiente diagnóstico será exclusivamente el formato de
+            // las matrices inverse-bind.
+            const size_t skin_matrix_count =
+                g_cash_model.inverse_bind_matrices.size() / 16;
+            size_t valid_bone_matrix_indices = 0;
+
+            for (const auto& bone : g_cash_model.bones) {
+                if (static_cast<size_t>(bone.matrix_index) <
+                    skin_matrix_count) {
+                    ++valid_bone_matrix_indices;
+                }
+            }
+
+            g_cash_skinning_enabled =
+                !g_cash_model.bones.empty() &&
+                skin_matrix_count > 0 &&
+                valid_bone_matrix_indices > 0;
 
             LOGI(
-                "CASH SKINNING: disabled pending HAnim/Skin mapping validation. "
-                "bones=%zu skinMatrices=%zu",
+                "CASH SKINNING: enabled=%s bones=%zu "
+                "skinMatrices=%zu validMatrixIndices=%zu",
+                g_cash_skinning_enabled ? "YES" : "NO",
                 g_cash_model.bones.size(),
-                g_cash_model.inverse_bind_matrices.size() / 16
+                skin_matrix_count,
+                valid_bone_matrix_indices
             );
 
             g_cash_y_offset = 0.0f;
@@ -2346,11 +2364,10 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     g_on_ground = false;
     g_move_fwd  = 0.f;
     g_move_right= 0.f;
-    // Arrancar en selección automática. El jugador debe comenzar
-    // en Stand_Idle y cambiar a Walk/Run según el movimiento.
-    g_debug_anim_idx = -2;
-    // El skinning queda desactivado hasta validar el mapeo exacto
-    // HAnim -> Skin -> FrameList del DFF de Cash.
+    // Primera prueba del skinning corregido: pose base, sin IFP.
+    // Así verificamos Skin + FrameList por separado antes de mezclar
+    // animación.
+    g_debug_anim_idx = -1;
     g_cash_skinning_enabled = false;
     g_cash_pos_adjust = {0.0f, 1.0f, 0.0f};
     g_cash_rot_adjust_deg = {0.0f, -91.0f, 180.0f};
