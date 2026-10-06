@@ -49,7 +49,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="AJUSTE CASH"
+            android:text="AJUSTES"
             android:textColor="#FFFFFF"
             android:textStyle="bold"
             android:textSize="18sp"
@@ -68,43 +68,5 @@
             android:layout_height="wrap_content"
             android:max="30"
             android:progress="14" />
-
-        <TextView android:id="@+id/lbl_pos_x" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:text="Pos X: +0.00 m" />
-        <SeekBar android:id="@+id/seek_pos_x" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="600" android:progress="300" />
-
-        <TextView android:id="@+id/lbl_pos_y" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:text="Pos Y: +0.00 m" />
-        <SeekBar android:id="@+id/seek_pos_y" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="600" android:progress="300" />
-
-        <TextView android:id="@+id/lbl_pos_z" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:text="Pos Z: +0.00 m" />
-        <SeekBar android:id="@+id/seek_pos_z" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="600" android:progress="300" />
-
-        <TextView android:id="@+id/lbl_rot_x" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:text="Rot X: +0°" />
-        <SeekBar android:id="@+id/seek_rot_x" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="360" android:progress="180" />
-
-        <TextView android:id="@+id/lbl_rot_y" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:text="Rot Y: +0°" />
-        <SeekBar android:id="@+id/seek_rot_y" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="360" android:progress="180" />
-
-        <TextView android:id="@+id/lbl_rot_z" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:text="Rot Z: +0°" />
-        <SeekBar android:id="@+id/seek_rot_z" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="360" android:progress="180" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/btn_reset_adjust"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:text="Reset" />
-
-            <Button
-                android:id="@+id/btn_copy_adjust"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:text="Copiar" />
-        </LinearLayout>
     </LinearLayout>
 </FrameLayout>
