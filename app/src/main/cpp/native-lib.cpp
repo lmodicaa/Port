@@ -1054,6 +1054,58 @@ static float find_floor(float px, float search_y, float pz) {
     return best;
 }
 
+// Busca el suelo considerando el pequeño volumen de apoyo del COL del
+// jugador, no únicamente un punto central. Esto hace que los bordes y
+// cambios de nivel sean más estables, especialmente al bajar escaleras.
+static float find_player_floor(float px, float search_y, float pz) {
+    float probe_radius = 0.25f;
+
+    if (g_player_col_model) {
+        for (const auto& sphere : g_player_col_model->spheres) {
+            const float horizontal_radius =
+                sqrtf(
+                    sphere.center.x * sphere.center.x +
+                    sphere.center.z * sphere.center.z
+                ) +
+                std::max(0.0f, sphere.radius);
+
+            probe_radius = std::max(
+                probe_radius,
+                horizontal_radius * 0.70f
+            );
+        }
+    }
+
+    probe_radius = std::min(
+        std::max(probe_radius, 0.10f),
+        0.50f
+    );
+
+    const float offsets[5][2] = {
+        { 0.0f,         0.0f         },
+        { probe_radius, 0.0f         },
+        {-probe_radius, 0.0f         },
+        { 0.0f,         probe_radius },
+        { 0.0f,        -probe_radius }
+    };
+
+    float best = -1e9f;
+
+    for (const auto& offset : offsets) {
+        const float floor_y = find_floor(
+            px + offset[0],
+            search_y,
+            pz + offset[1]
+        );
+
+        if (floor_y > best) {
+            best = floor_y;
+        }
+    }
+
+    return best;
+}
+
 // Raycast vertical hacia arriba usando la geometría BSP del nivel.
 // El origen del actor corresponde a y=0 del COL "player" y su altura
 // real es 2.0 unidades en Asylum.
@@ -2163,12 +2215,12 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         //
         // No usamos el modelo render ni una caja inventada: el suelo
         // sigue viniendo de la geometría de colisión del nivel.
-        const float current_floor = find_floor(
+        const float current_floor = find_player_floor(
             g_player_pos.x,
             g_player_pos.y + 2.0f,
             g_player_pos.z
         );
-        const float wanted_floor = find_floor(
+        const float wanted_floor = find_player_floor(
             wanted_x,
             g_player_pos.y + PLAYER_MAX_STEP_HEIGHT + 2.0f,
             wanted_z
@@ -2275,7 +2327,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             // El punto de apoyo del player COL está en local Y=0.
             // Por eso el suelo se traduce directamente en la posición
             // vertical del actor.
-            const float floor_y = find_floor(
+            const float floor_y = find_player_floor(
                 g_player_pos.x,
                 std::max(
                     g_player_pos.y + 1.0f,
@@ -2284,7 +2336,11 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 g_player_pos.z
             );
 
+            // Durante una caída, el suelo válido debe estar en o por
+            // debajo de la posición actual. Un techo visto por debajo
+            // del origen del raycast no puede elevar al actor.
             if (floor_y > -1e8f &&
+                floor_y <= g_player_pos.y + 0.02f &&
                 next_y < floor_y) {
                 g_player_pos.y = floor_y;
                 g_vel_y = 0.0f;
@@ -2317,13 +2373,14 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
 
     // Una comprobación final evita quedar ligeramente por debajo del suelo
     // por errores de redondeo después del último paso.
-    const float final_floor_y = find_floor(
+    const float final_floor_y = find_player_floor(
         g_player_pos.x,
         g_player_pos.y + 1.0f,
         g_player_pos.z
     );
 
     if (final_floor_y > -1e8f &&
+        final_floor_y <= g_player_pos.y + 0.02f &&
         g_player_pos.y < final_floor_y) {
         g_player_pos.y = final_floor_y;
         g_vel_y = 0.0f;
