@@ -182,6 +182,13 @@ static TXDTexture parse_texture_native(Reader& r, size_t chunk_end) {
     uint32_t platform   = r.read<uint32_t>();
     uint32_t filter     = r.read<uint32_t>();
 
+    // RenderWare guarda FilterAddress en un único DWORD:
+    // bits 0..7 = filtro, 8..11 = U, 12..15 = V.
+    tex.filter_address = filter;
+    tex.filter_mode = static_cast<uint8_t>(filter & 0xFFu);
+    tex.address_u = static_cast<uint8_t>((filter >> 8) & 0x0Fu);
+    tex.address_v = static_cast<uint8_t>((filter >> 12) & 0x0Fu);
+
     char name[33] = {}; memcpy(name, r.base + r.pos, 32); r.skip(32);
     char mask[33] = {}; memcpy(mask, r.base + r.pos, 32); r.skip(32);
 
