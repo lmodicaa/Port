@@ -757,6 +757,11 @@ static const Animation* g_turn_anim = nullptr;
 static bool g_turn_gesture_active = false;
 static float g_turn_gesture_amount = 0.0f;
 
+// Estado de locomoción para transiciones reales del IFP.
+static const Animation* g_locomotion_special_anim = nullptr;
+static bool g_locomotion_was_moving = false;
+static Vec3 g_last_move_dir = {0.0f, 0.0f, -1.0f};
+
 // El yaw del actor es la orientación real. El mouse/touch del PC gira
 // continuamente; no se fuerza una animación de giro por cada gesto.
 
@@ -1046,6 +1051,133 @@ static bool is_looping_locomotion_animation(const Animation* anim) {
            n == "Sneak_Walk_Left" || n == "Sneak_Walk_Right" ||
            n == "Sprint_Fwd" || n == "Sprint_Bkw" ||
            n == "Sprint_Left" || n == "Sprint_Right";
+}
+
+static const Animation* find_animation_ci(const char* wanted) {
+    if (!wanted) return nullptr;
+    const std::string query = to_lower(wanted);
+    for (const auto& pair : g_anims) {
+        if (to_lower(pair.first) == query) {
+            return &pair.second;
+        }
+    }
+    return nullptr;
+}
+
+static const char* locomotion_direction_from_vector(Vec3 vel_xz) {
+    const float cy = cosf(g_player_yaw);
+    const float sy = sinf(g_player_yaw);
+    const Vec3 fwd = {-sy, 0.0f, -cy};
+    const Vec3 right = {cy, 0.0f, -sy};
+
+    const float local_fwd =
+        vel_xz.x * fwd.x + vel_xz.z * fwd.z;
+    const float local_right =
+        vel_xz.x * right.x + vel_xz.z * right.z;
+
+    if (std::fabs(local_fwd) >= std::fabs(local_right)) {
+        return local_fwd >= 0.0f ? "Fwd" : "Bkw";
+    }
+    return local_right >= 0.0f ? "Right" : "Left";
+}
+
+static const char* locomotion_direction_from_animation(const Animation* anim) {
+    if (!anim) return "Fwd";
+    const std::string n = to_lower(anim->name);
+    if (n.find("_bkw") != std::string::npos) return "Bkw";
+    if (n.find("_left") != std::string::npos) return "Left";
+    if (n.find("_right") != std::string::npos) return "Right";
+    return "Fwd";
+}
+
+static const Animation* find_move_start_animation(const char* direction) {
+    const char* candidates[5];
+    if (direction && std::strcmp(direction, "Fwd") == 0) {
+        candidates[0] = "Move_Start_Fwd";
+        candidates[1] = "Walk_Start_Fwd";
+    } else if (direction && std::strcmp(direction, "Bkw") == 0) {
+        candidates[0] = "Move_Start_Bkw";
+        candidates[1] = "Walk_Start_Bkw";
+    } else if (direction && std::strcmp(direction, "Left") == 0) {
+        candidates[0] = "Move_Start_Left";
+        candidates[1] = "Walk_Start_Left";
+    } else {
+        candidates[0] = "Move_Start_Right";
+        candidates[1] = "Walk_Start_Right";
+    }
+    candidates[2] = "Move_Start";
+    candidates[3] = "Walk_Start";
+    candidates[4] = nullptr;
+
+    for (int i = 0; candidates[i]; ++i) {
+        if (const Animation* a = find_animation_ci(candidates[i])) {
+            return a;
+        }
+    }
+    return nullptr;
+}
+
+static const Animation* find_skid_animation(const char* direction) {
+    const char* candidates[3];
+    if (direction && std::strcmp(direction, "Bkw") == 0) {
+        candidates[0] = "Skid_Bkw";
+    } else if (direction && std::strcmp(direction, "Left") == 0) {
+        candidates[0] = "Skid_Left";
+    } else if (direction && std::strcmp(direction, "Right") == 0) {
+        candidates[0] = "Skid_Right";
+    } else {
+        candidates[0] = "Skid_Fwd";
+    }
+    candidates[1] = "Skid";
+    candidates[2] = nullptr;
+
+    for (int i = 0; candidates[i]; ++i) {
+        if (const Animation* a = find_animation_ci(candidates[i])) {
+            return a;
+        }
+    }
+    return nullptr;
+}
+
+static const Animation* requested_locomotion_animation(Vec3 vel_xz) {
+    const char* direction = locomotion_direction_from_vector(vel_xz);
+    const char* family =
+        sprint_is_active() ? "Sprint_" :
+        (g_sneak_pressed ? "Sneak_Walk_" : "Walk_");
+
+    const std::string wanted =
+        std::string(family) + direction;
+    return find_animation_ci(wanted.c_str());
+}
+
+static float locomotion_phase(const Animation* anim, float time) {
+    if (!anim || anim->duration <= 0.0001f) return 0.0f;
+    float phase = fmodf(time, anim->duration) / anim->duration;
+    if (phase < 0.0f) phase += 1.0f;
+    return phase;
+}
+
+static float root_motion_distance_for_animation(
+    const Animation* anim,
+    float time,
+    float dt
+) {
+    if (!anim || dt <= 0.0f) return 0.0f;
+
+    Vec3 delta{};
+    if (!animation_root_motion_delta(
+            anim,
+            time,
+            dt,
+            &delta
+        )) {
+        return 0.0f;
+    }
+
+    return sqrtf(
+        delta.x * delta.x +
+        delta.z * delta.z
+    );
 }
 
 static float locomotion_root_motion_speed(
@@ -3082,6 +3214,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     g_on_ground = false;
     g_move_fwd  = 0.f;
     g_move_right= 0.f;
+    g_locomotion_special_anim = nullptr;
+    g_locomotion_was_moving = false;
+    g_last_move_dir = {0.0f, 0.0f, -1.0f};
     // Empezamos en bind pose; después de validar Skin se activa el IFP.
     g_debug_anim_idx = -1;
     g_cash_skinning_enabled = false;
@@ -3188,71 +3323,112 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         vel_xz = {0.0f, 0.0f, 0.0f};
     }
 
-    // Usar el delta real del nodo root de HAnim para este frame.
-    // La versión anterior calculaba distance/duration, lo que producía
-    // pequeñas diferencias entre los pasos y el desplazamiento del actor.
+    const bool currently_moving = input_strength > 0.01f;
+
+    if (currently_moving) {
+        const float dir_len = sqrtf(
+            vel_xz.x * vel_xz.x +
+            vel_xz.z * vel_xz.z
+        );
+        if (dir_len > 0.0001f) {
+            g_last_move_dir = {
+                vel_xz.x / dir_len,
+                0.0f,
+                vel_xz.z / dir_len
+            };
+        }
+
+        // Al empezar a moverse, usar Move_Start solo si el IFP realmente
+        // contiene esa animación. Nunca inventamos una animación.
+        if (!g_locomotion_was_moving &&
+            !g_locomotion_special_anim) {
+            g_locomotion_special_anim =
+                find_move_start_animation(
+                    locomotion_direction_from_vector(vel_xz)
+                );
+            if (g_locomotion_special_anim) {
+                g_anim_time = 0.0f;
+                LOGI(
+                    "LOCOMOTION START: %s",
+                    g_locomotion_special_anim->name.c_str()
+                );
+            }
+        }
+    } else if (g_locomotion_was_moving) {
+        // Al soltar el stick, reproducir la frenada real del IFP si existe.
+        const char* direction =
+            locomotion_direction_from_animation(g_current_anim);
+
+        g_locomotion_special_anim =
+            find_skid_animation(direction);
+
+        if (g_locomotion_special_anim) {
+            g_anim_time = 0.0f;
+            LOGI(
+                "LOCOMOTION SKID: %s",
+                g_locomotion_special_anim->name.c_str()
+            );
+        }
+    }
+
+    // Una transición especial se deja terminar a su duración completa.
+    if (g_locomotion_special_anim &&
+        g_locomotion_special_anim->duration > 0.0f &&
+        g_anim_time >= g_locomotion_special_anim->duration) {
+        g_locomotion_special_anim = nullptr;
+        g_anim_time = 0.0f;
+    }
+
+    const Animation* motion_anim =
+        g_locomotion_special_anim
+            ? g_locomotion_special_anim
+            : requested_locomotion_animation(
+                  currently_moving ? vel_xz : g_last_move_dir
+              );
+
     Vec3 root_delta_local{};
     const bool have_root_delta =
         animation_root_motion_delta(
-            [&]() -> const Animation* {
-                const float local_fwd =
-                    vel_xz.x * fwd_xz.x + vel_xz.z * fwd_xz.z;
-                const float local_right =
-                    vel_xz.x * right_xz.x + vel_xz.z * right_xz.z;
-
-                const bool forward_axis =
-                    std::fabs(local_fwd) >= std::fabs(local_right);
-                const char* direction =
-                    forward_axis
-                        ? (local_fwd >= 0.0f ? "Fwd" : "Bkw")
-                        : (local_right >= 0.0f ? "Right" : "Left");
-
-                const char* family =
-                    sprint_is_active() ? "Sprint_" :
-                    (g_sneak_pressed ? "Sneak_Walk_" : "Walk_");
-
-                const std::string wanted =
-                    std::string(family) + direction;
-
-                for (const auto& pair : g_anims) {
-                    if (to_lower(pair.first) == to_lower(wanted)) {
-                        return &pair.second;
-                    }
-                }
-                return nullptr;
-            }(),
+            motion_anim,
             g_anim_time,
             dt,
             &root_delta_local
         );
 
-    float root_distance = 0.0f;
-    if (have_root_delta) {
-        root_distance = sqrtf(
-            root_delta_local.x * root_delta_local.x +
-            root_delta_local.z * root_delta_local.z
-        );
+    const float root_distance =
+        have_root_delta
+            ? sqrtf(
+                  root_delta_local.x * root_delta_local.x +
+                  root_delta_local.z * root_delta_local.z
+              )
+            : 0.0f;
 
-        // Mantener los multiplicadores originales de EntityTypeData.
-        if (g_sneak_pressed) {
-            root_distance *= g_player_control.sneak_walk_speed;
-        } else if (sprint_is_active()) {
-            root_distance *= g_player_control.sprint_speed;
-        } else {
-            root_distance *= g_player_control.walk_speed;
-        }
+
+    // Mantener los multiplicadores originales de EntityTypeData.
+    float scaled_root_distance = root_distance;
+    if (g_sneak_pressed) {
+        scaled_root_distance *= g_player_control.sneak_walk_speed;
+    } else if (sprint_is_active()) {
+        scaled_root_distance *= g_player_control.sprint_speed;
+    } else if (currently_moving) {
+        scaled_root_distance *= g_player_control.walk_speed;
     }
 
     const float movement_speed =
-        root_distance > 0.0001f
-            ? root_distance / std::max(dt, 0.0001f)
+        scaled_root_distance > 0.0001f
+            ? scaled_root_distance / std::max(dt, 0.0001f)
             : MOVE_SPEED_FALLBACK;
+
+    // Durante un skid no hay entrada actual; conservamos la última
+    // dirección del jugador para trasladar el actor junto con la frenada.
+    const Vec3 movement_dir =
+        currently_moving ? vel_xz : g_last_move_dir;
 
     // La locomoción Walk usa la velocidad completa de su animación.
     // La intensidad del stick solo determina si hay movimiento, no ralentiza
     // artificialmente el ciclo ni el desplazamiento del personaje.
-    const float move_dx = vel_xz.x * movement_speed * dt;
-    const float move_dz = vel_xz.z * movement_speed * dt;
+    const float move_dx = movement_dir.x * movement_speed * dt;
+    const float move_dz = movement_dir.z * movement_speed * dt;
 
     // Resolver el desplazamiento en pequeños pasos evita atravesar
     // superficies finas cuando un frame produce un movimiento grande.
@@ -4001,7 +4177,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 family = "Walk_";
             }
 
-            if (family) {
+            if (g_locomotion_special_anim) {
+                anim = g_locomotion_special_anim;
+            } else if (family) {
                 std::string wanted = std::string(family) + direction;
                 anim = find_anim(wanted.c_str());
             } else if (g_turn_gesture_active && g_turn_anim) {
@@ -4082,9 +4260,28 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             g_previous_anim_time = g_anim_time;
             g_anim_transition_time = 0.0f;
 
+            float preserved_phase = 0.0f;
+            const bool preserve_phase =
+                g_current_anim &&
+                anim &&
+                !g_locomotion_special_anim &&
+                is_looping_locomotion_animation(g_current_anim) &&
+                is_looping_locomotion_animation(anim);
+
+            if (preserve_phase) {
+                preserved_phase =
+                    locomotion_phase(
+                        g_current_anim,
+                        g_anim_time
+                    );
+            }
+
             g_current_anim = anim;
             g_last_played_anim = anim ? anim->name : std::string();
-            g_anim_time = 0.0f;
+            g_anim_time =
+                preserve_phase && anim && anim->duration > 0.0001f
+                    ? preserved_phase * anim->duration
+                    : 0.0f;
 
             if (g_previous_anim && anim &&
                 g_previous_anim != anim) {
@@ -4170,6 +4367,8 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             g_debug_anim_idx = -2;
             LOGI("IFP: Skin validado, activando animacion automatica");
         }
+
+        g_locomotion_was_moving = currently_moving;
 
         /*
          * --------------------------------------------------------
@@ -4966,8 +5165,15 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
 
         if (!g_turn_gesture_active) {
             g_turn_gesture_active = true;
-            const char* wanted =
-                x > 0.0f ? "Stand_Turn_Right" : "Stand_Turn";
+            const char* wanted = nullptr;
+            if (g_sneak_pressed) {
+                wanted = "Sneak_Turn";
+            } else {
+                wanted =
+                    x > 0.0f
+                        ? "Stand_Turn_Right"
+                        : "Stand_Turn";
+            }
             const std::string query = to_lower(wanted);
             g_turn_anim = nullptr;
             for (const auto& pair : g_anims) {
