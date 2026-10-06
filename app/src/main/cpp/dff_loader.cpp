@@ -312,17 +312,22 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                                 usedBoneIndices[i] = r.read<uint8_t>();
                             }
                         }
-                        
+
+                        // El índice almacenado por vértice es LOCAL al
+                        // Skin plugin. No lo sustituimos por el frame index:
+                        // esa conversión se aplica al construir la palette
+                        // de skin, donde también se relaciona con la
+                        // inverse-bind matrix del mismo Skin bone.
                         size_t vertex_offset = model.vertices.size() - numVertices;
                         for (uint32_t i = 0; i < numVertices; i++) {
                             for (int j = 0; j < 4; j++) {
-                                uint8_t idx = r.read<uint8_t>();
-                                if (usedBoneCount > 0 && idx < usedBoneCount) {
-                                    model.vertices[vertex_offset + i].bone_indices[j] = usedBoneIndices[idx];
-                                } else {
-                                    model.vertices[vertex_offset + i].bone_indices[j] = idx;
-                                }
+                                const uint8_t idx = r.read<uint8_t>();
+                                model.vertices[vertex_offset + i].bone_indices[j] = idx;
                             }
+                        }
+
+                        if (!usedBoneIndices.empty()) {
+                            model.skin_bone_to_frame = usedBoneIndices;
                         }
                         for (uint32_t i = 0; i < numVertices; i++) {
                             model.vertices[vertex_offset + i].bone_weights[0] = r.read<float>();
@@ -339,14 +344,36 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                             ? (plugin.size - header_used - consumed_vertices) : 0;
                         if (remaining >= (uint32_t)boneCount * 64) {
                             model.inverse_bind_matrices.resize((size_t)boneCount * 16);
-                            // RW Inverse Bind Matrices son column-major-compatible en memoria si omitimos el transpose erroneo.
-                            // right (x,y,z,0), up (x,y,z,0), at (x,y,z,0), pos (x,y,z,1)
+
+                            // Las inverse-bind del Skin plugin están almacenadas
+                            // con el orden matricial de RenderWare. Para usarlas
+                            // como Mat4 column-major de OpenGL debemos convertir
+                            // la representación a nuestra convención.
                             for (uint32_t b = 0; b < boneCount; b++) {
-                                float* m = &model.inverse_bind_matrices[(size_t)b * 16];
-                                for (int k = 0; k < 16; k++) m[k] = r.read<float>();
-                                
-                                // Asegurar formato affine
-                                m[3] = 0.0f; m[7] = 0.0f; m[11] = 0.0f; m[15] = 1.0f;
+                                float raw[16];
+                                for (int k = 0; k < 16; ++k) {
+                                    raw[k] = r.read<float>();
+                                }
+
+                                float* m =
+                                    &model.inverse_bind_matrices[
+                                        static_cast<size_t>(b) * 16
+                                    ];
+
+                                // Transposición explícita: raw es la
+                                // representación de RenderWare; m queda en
+                                // column-major para mat4_mul()/GLSL.
+                                for (int row = 0; row < 4; ++row) {
+                                    for (int col = 0; col < 4; ++col) {
+                                        m[row + col * 4] =
+                                            raw[col + row * 4];
+                                    }
+                                }
+
+                                m[3] = 0.0f;
+                                m[7] = 0.0f;
+                                m[11] = 0.0f;
+                                m[15] = 1.0f;
                             }
                             remaining -= (uint32_t)boneCount * 64;
                             if (boneCount == 65 || boneCount > 60) {
@@ -358,7 +385,13 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                         }
                         if (remaining > 0) r.skip(remaining);
                         
-                        LOGI("Skin Plugin cargado: %d huesos (used=%d), matrices guardadas.", boneCount, usedBoneCount);
+                        LOGI(
+                            "Skin Plugin cargado: bones=%d used=%d matrices=%zu remap=%zu",
+                            boneCount,
+                            usedBoneCount,
+                            model.inverse_bind_matrices.size() / 16,
+                            model.skin_bone_to_frame.size()
+                        );
                     } else {
                         r.skip(plugin.size);
                     }
