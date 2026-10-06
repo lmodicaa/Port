@@ -142,6 +142,12 @@ static GLuint g_program           = 0;
 static GLuint g_vao               = 0;
 static std::map<std::string, GLuint> g_tex_map;
 static std::map<std::string, Animation> g_anims;
+// Debug de animaciones:
+// -2 = modo automático según movimiento
+// -1 = bind pose (sin IFP)
+// >=0 = índice dentro de g_debug_anim_list
+static int g_debug_anim_idx = -2;
+static std::vector<const Animation*> g_debug_anim_list;
 
 static std::string to_lower(std::string s) {
     for (char& c : s) c = tolower((unsigned char)c);
@@ -152,6 +158,96 @@ static GLuint get_texture(const std::string& name) {
     if (name.empty()) return 0;
     auto it = g_tex_map.find(to_lower(name));
     return (it != g_tex_map.end()) ? it->second : 0;
+}
+
+static void rebuild_debug_animation_list() {
+    g_debug_anim_list.clear();
+    g_debug_anim_list.reserve(g_anims.size());
+
+    for (const auto& pair : g_anims) {
+        if (!pair.second.tracks.empty()) {
+            g_debug_anim_list.push_back(&pair.second);
+        }
+    }
+
+    LOGI("IFP DEBUG: %zu animaciones con tracks", g_debug_anim_list.size());
+    for (size_t i = 0; i < g_debug_anim_list.size(); ++i) {
+        const Animation* anim = g_debug_anim_list[i];
+        LOGI("IFP DEBUG [%zu] %s duration=%.3f tracks=%zu",
+             i,
+             anim->name.c_str(),
+             anim->duration,
+             anim->tracks.size());
+    }
+}
+
+static void dump_cash_debug(const DFFModel& model) {
+    size_t weighted_vertices = 0;
+    size_t zero_weight_vertices = 0;
+    size_t normalized_vertices = 0;
+    uint32_t max_bone_index = 0;
+    float min_weight_sum = 1e30f;
+    float max_weight_sum = -1e30f;
+
+    for (const auto& v : model.vertices) {
+        const float sum =
+            v.bone_weights[0] +
+            v.bone_weights[1] +
+            v.bone_weights[2] +
+            v.bone_weights[3];
+
+        if (sum > 0.000001f) {
+            ++weighted_vertices;
+            min_weight_sum = std::min(min_weight_sum, sum);
+            max_weight_sum = std::max(max_weight_sum, sum);
+
+            if (std::fabs(sum - 1.0f) <= 0.001f) {
+                ++normalized_vertices;
+            }
+        } else {
+            ++zero_weight_vertices;
+        }
+
+        for (int j = 0; j < 4; ++j) {
+            max_bone_index = std::max(
+                max_bone_index,
+                static_cast<uint32_t>(v.bone_indices[j])
+            );
+        }
+    }
+
+    if (weighted_vertices == 0) {
+        min_weight_sum = 0.0f;
+        max_weight_sum = 0.0f;
+    }
+
+    size_t unmapped_bones = 0;
+    for (const auto& bone : model.bones) {
+        if (bone.bone_id == 0xFFFFFFFF ||
+            bone.matrix_index == 0xFFFFFFFF) {
+            ++unmapped_bones;
+        }
+    }
+
+    const size_t skin_matrices =
+        model.inverse_bind_matrices.size() / 16;
+
+    LOGI(
+        "CASH DEBUG: vertices=%zu bones=%zu skinMatrices=%zu "
+        "weighted=%zu zeroWeight=%zu normalized=%zu "
+        "unmappedBones=%zu maxBoneIndex=%u weightSumMin=%.5f "
+        "weightSumMax=%.5f",
+        model.vertices.size(),
+        model.bones.size(),
+        skin_matrices,
+        weighted_vertices,
+        zero_weight_vertices,
+        normalized_vertices,
+        unmapped_bones,
+        max_bone_index,
+        min_weight_sum,
+        max_weight_sum
+    );
 }
 static std::vector<RenderGroup>  g_groups;
 static int    g_width             = 0;
@@ -435,44 +531,75 @@ static float find_floor(float px, float search_y, float pz) {
 static bool hit_wall(float x1, float y1, float z1, float x2, float y2, float z2) {
     Vec3 ray_o = {x1, y1, z1};
     Vec3 ray_d = {x2 - x1, y2 - y1, z2 - z1};
-    float dist = sqrtf(ray_d.x*ray_d.x + ray_d.y*ray_d.y + ray_d.z*ray_d.z);
+    const float dist = sqrtf(
+        ray_d.x*ray_d.x +
+        ray_d.y*ray_d.y +
+        ray_d.z*ray_d.z
+    );
     if (dist < 0.001f) return false;
-    ray_d.x /= dist; ray_d.y /= dist; ray_d.z /= dist;
 
-    // We check the cell based on the start position (sufficient for small movements)
-    const std::vector<Tri>* tris = g_col_grid.get(x1, z1);
-    if (!tris) return false;
+    ray_d.x /= dist;
+    ray_d.y /= dist;
+    ray_d.z /= dist;
 
-    for (const auto& tri : *tris) {
-        Vec3 e1 = {tri.b.x-tri.a.x, tri.b.y-tri.a.y, tri.b.z-tri.a.z};
-        Vec3 e2 = {tri.c.x-tri.a.x, tri.c.y-tri.a.y, tri.c.z-tri.a.z};
-        
-        Vec3 n = vec3_cross(e1, e2);
-        float nlen = sqrtf(n.x*n.x + n.y*n.y + n.z*n.z);
-        if (nlen > 0.0f) { n.x/=nlen; n.y/=nlen; n.z/=nlen; }
-        
-        // Sólo chequear contra paredes (normal Y cercano a 0)
-        if (fabsf(n.y) > 0.7f) continue;
-        
-        Vec3 h  = vec3_cross(ray_d, e2);
-        float det = vec3_dot(e1, h);
-        if (fabsf(det) < 1e-6f) continue;
-        float inv_det = 1.0f / det;
-        Vec3 s   = {ray_o.x-tri.a.x, ray_o.y-tri.a.y, ray_o.z-tri.a.z};
-        float u  = vec3_dot(s, h) * inv_det;
-        if (u < 0.0f || u > 1.0f) continue;
-        Vec3 q   = vec3_cross(s, e1);
-        float v  = vec3_dot(ray_d, q) * inv_det;
-        if (v < 0.0f || u + v > 1.0f) continue;
-        float t  = vec3_dot(e2, q) * inv_det;
-        
-        // Check si choca en el rango de movimiento + radio del jugador
-        if (t > 0.0f && t < dist + 0.15f) { 
-            return true;
+    const float inv_cell = 1.0f / g_col_grid.cell_size;
+    const int cx0 = static_cast<int>(std::floor(x1 * inv_cell));
+    const int cz0 = static_cast<int>(std::floor(z1 * inv_cell));
+    const int cx1 = static_cast<int>(std::floor(x2 * inv_cell));
+    const int cz1 = static_cast<int>(std::floor(z2 * inv_cell));
+
+    const int min_cx = std::min(cx0, cx1) - 1;
+    const int max_cx = std::max(cx0, cx1) + 1;
+    const int min_cz = std::min(cz0, cz1) - 1;
+    const int max_cz = std::max(cz0, cz1) + 1;
+
+    for (int cx = min_cx; cx <= max_cx; ++cx) {
+        for (int cz = min_cz; cz <= max_cz; ++cz) {
+            const auto it = g_col_grid.cells.find({cx, cz});
+            if (it == g_col_grid.cells.end()) continue;
+
+            for (const auto& tri : it->second) {
+                Vec3 e1 = {tri.b.x-tri.a.x, tri.b.y-tri.a.y, tri.b.z-tri.a.z};
+                Vec3 e2 = {tri.c.x-tri.a.x, tri.c.y-tri.a.y, tri.c.z-tri.a.z};
+
+                Vec3 n = vec3_cross(e1, e2);
+                const float nlen = sqrtf(n.x*n.x + n.y*n.y + n.z*n.z);
+                if (nlen > 0.0f) {
+                    n.x/=nlen;
+                    n.y/=nlen;
+                    n.z/=nlen;
+                }
+
+                if (fabsf(n.y) > 0.7f) continue;
+
+                Vec3 h = vec3_cross(ray_d, e2);
+                const float det = vec3_dot(e1, h);
+                if (fabsf(det) < 1e-6f) continue;
+
+                const float inv_det = 1.0f / det;
+                Vec3 s = {
+                    ray_o.x-tri.a.x,
+                    ray_o.y-tri.a.y,
+                    ray_o.z-tri.a.z
+                };
+
+                const float u = vec3_dot(s, h) * inv_det;
+                if (u < 0.0f || u > 1.0f) continue;
+
+                Vec3 q = vec3_cross(s, e1);
+                const float v = vec3_dot(ray_d, q) * inv_det;
+                if (v < 0.0f || u + v > 1.0f) continue;
+
+                const float t = vec3_dot(e2, q) * inv_det;
+                if (t > 0.0f && t < dist + 0.15f) {
+                    return true;
+                }
+            }
         }
     }
+
     return false;
-}
+
 
 static void load_txd_to_gpu(const char* path) {
     auto txd_raw = read_asset(path);
@@ -675,7 +802,10 @@ static void setup_model() {
         for (const auto& pair : g_anims) {
             LOGI(" - %s", pair.first.c_str());
         }
+        rebuild_debug_animation_list();
     } else {
+        g_anims.clear();
+        g_debug_anim_list.clear();
         LOGE("No se encontro allanims.ifp");
     }
 }
@@ -899,47 +1029,52 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
          * --------------------------------------------------------
          */
         const Animation* anim = nullptr;
-        float speed = sqrtf(
-            g_move_fwd * g_move_fwd +
-            g_move_right * g_move_right
-        );
-        auto find_anim = [&](const char* wanted) -> const Animation* {
-            std::string query = to_lower(wanted);
-            for (const auto& pair : g_anims) {
-                std::string name = to_lower(pair.first);
-                if (name == query) {
-                    return &pair.second;
-                }
-            }
-            return nullptr;
-        };
-        /*
-         * Primero intentamos encontrar las animaciones exactas.
-         */
-        const Animation* anim = nullptr;
-        std::string anim_name;
-        if (g_debug_anim_idx >= 0 && g_debug_anim_idx < (int)g_anims.size()) {
-            auto it = g_anims.begin();
-            std::advance(it, g_debug_anim_idx);
-            anim = &it->second;
-            anim_name = anim->name;
+
+        // Debug:
+        // -2 = selección automática
+        // -1 = bind pose
+        // >=0 = animación seleccionada manualmente
+        if (g_debug_anim_idx >= 0 &&
+            g_debug_anim_idx < static_cast<int>(g_debug_anim_list.size())) {
+            anim = g_debug_anim_list[
+                static_cast<size_t>(g_debug_anim_idx)
+            ];
         } else if (g_debug_anim_idx == -1) {
+            // Bind pose: no aplicar IFP.
             anim = nullptr;
-            anim_name = "Bind Pose";
         } else {
+            const float speed = sqrtf(
+                g_move_fwd * g_move_fwd +
+                g_move_right * g_move_right
+            );
+
+            auto find_anim = [&](const char* wanted) -> const Animation* {
+                const std::string query = to_lower(wanted);
+                for (const auto& pair : g_anims) {
+                    if (to_lower(pair.first) == query) {
+                        return &pair.second;
+                    }
+                }
+                return nullptr;
+            };
+
             if (speed > 0.6f) {
                 anim = find_anim("Run_Fwd");
-                anim_name = "Run_Fwd";
             } else if (speed > 0.05f) {
                 anim = find_anim("Walk_Fwd");
-                anim_name = "Walk_Fwd";
             } else {
                 anim = find_anim("Stand_Idle");
-                anim_name = "Stand_Idle";
             }
-            if (!anim) anim = find_anim("Stand_Idle");
-            if (!anim && !g_anims.empty()) anim = &g_anims.begin()->second;
+
+            if (!anim) {
+                anim = find_anim("Stand_Idle");
+            }
+
+            if (!anim && !g_anims.empty()) {
+                anim = &g_anims.begin()->second;
+            }
         }
+
         /*
          * --------------------------------------------------------
          * Debug de animación
@@ -1347,6 +1482,42 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
     g_cam_pitch = std::max(-1.4f, std::min(1.4f, g_cam_pitch));
 }
 
+// Siguiente animación de depuración.
+// Ciclo: automático -> bind pose -> animación 0 -> ... -> bind pose.
+JNIEXPORT void JNICALL
+Java_com_manhunt_port_ManhuntRenderer_nativeNextDebugAnimation(JNIEnv*, jobject) {
+    if (g_debug_anim_list.empty()) {
+        LOGI("DEBUG ANIM: no hay animaciones con tracks");
+        g_debug_anim_idx = -2;
+        return;
+    }
+
+    if (g_debug_anim_idx == -2) {
+        g_debug_anim_idx = -1;
+    } else if (g_debug_anim_idx == -1) {
+        g_debug_anim_idx = 0;
+    } else {
+        ++g_debug_anim_idx;
+        if (g_debug_anim_idx >= static_cast<int>(g_debug_anim_list.size())) {
+            g_debug_anim_idx = -1;
+        }
+    }
+
+    if (g_debug_anim_idx == -1) {
+        LOGI("DEBUG ANIM: BIND POSE");
+    } else {
+        const Animation* anim =
+            g_debug_anim_list[static_cast<size_t>(g_debug_anim_idx)];
+        LOGI(
+            "DEBUG ANIM: [%d] %s duration=%.3f tracks=%zu",
+            g_debug_anim_idx,
+            anim->name.c_str(),
+            anim->duration,
+            anim->tracks.size()
+        );
+    }
+}
+
 // Saltar
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeJump(JNIEnv*, jobject) {
@@ -1354,12 +1525,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeJump(JNIEnv*, jobject) {
         g_vel_y = 8.0f;
         g_on_ground = false;
     }
-    // Cycle debug animation
-    g_debug_anim_idx++;
-    if (g_debug_anim_idx >= (int)g_anims.size()) {
-        g_debug_anim_idx = -1; // -1 = bind pose
-    }
-    LOGI("DEBUG ANIM INDEX: %d", g_debug_anim_idx);
 }
 
 // Mantener compatibilidad con nativeDrag/nativeScale anteriores (los elimino)
