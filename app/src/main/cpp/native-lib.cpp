@@ -879,10 +879,10 @@ struct PlayerControlConfig {
 static PlayerControlConfig g_player_control;
 static float g_stamina_remaining = 20.0f;
 static float g_stamina_recovery_delay = 0.0f;
+static bool g_sprint_active = false;
 
 static bool sprint_is_active() {
-    return g_sprint_pressed &&
-           g_stamina_remaining > g_player_control.stamina_no_sprint_time;
+    return g_sprint_active;
 }
 
 static void update_player_stamina(float dt, bool moving) {
@@ -891,12 +891,16 @@ static void update_player_stamina(float dt, bool moving) {
     const float total =
         std::max(0.001f, g_player_control.stamina_total_sprint_time);
 
-    if (g_sprint_pressed && moving &&
+    if (g_sprint_active && moving &&
         g_stamina_remaining > 0.0f) {
         g_stamina_remaining =
             std::max(0.0f, g_stamina_remaining - dt);
         g_stamina_recovery_delay =
             std::max(0.0f, g_player_control.stamina_recovery_pause);
+
+        if (g_stamina_remaining <= 0.0f) {
+            g_sprint_active = false;
+        }
         return;
     }
 
@@ -4816,6 +4820,18 @@ Java_com_manhunt_port_ManhuntRenderer_nativeMove(JNIEnv*, jobject, jfloat fwd, j
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeSetSprint(JNIEnv*, jobject, jboolean pressed) {
     g_sprint_pressed = pressed;
+
+    if (!pressed) {
+        g_sprint_active = false;
+        return;
+    }
+
+    // STAMINA_NO_SPRINT_TIME solo bloquea el comienzo de un nuevo sprint.
+    if (g_stamina_remaining > g_player_control.stamina_no_sprint_time) {
+        g_sprint_active = true;
+    } else {
+        g_sprint_active = false;
+    }
 }
 
 JNIEXPORT void JNICALL
