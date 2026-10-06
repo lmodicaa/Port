@@ -394,7 +394,10 @@ static float g_move_right = 0.f;  // -1..1  (izquierda/derecha)
 static float  g_vel_y    = 0.f;
 static bool   g_on_ground= false;
 static const float GRAVITY        = -20.0f;
-static const float MOVE_SPEED     = 10.0f;
+// Tope provisional basado en la magnitud de movimiento documentada
+// para personajes en PLAYER_PHYS. El valor original exacto de caminar
+// no está expuesto directamente en nuestros archivos de datos.
+static const float MOVE_SPEED     = 6.5f;
 
 // Altura máxima de escalón que el actor puede salvar sin saltar.
 // Se mantiene por debajo de la altura de las esferas inferiores del
@@ -2294,15 +2297,32 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         vec3_scale(fwd_xz,   g_move_fwd),
         vec3_scale(right_xz, g_move_right)
     );
-    float speed_sq = vel_xz.x*vel_xz.x + vel_xz.z*vel_xz.z;
-    if (speed_sq > 0.01f) {
-        float inv = 1.0f / sqrtf(speed_sq);
-        vel_xz.x *= inv; vel_xz.z *= inv;
+
+    // No convertir cualquier toque del joystick en velocidad máxima.
+    // Conservamos la magnitud analógica para que caminar despacio sea
+    // realmente posible y el máximo solo aparezca al llevarlo al borde.
+    float input_strength = sqrtf(
+        vel_xz.x * vel_xz.x +
+        vel_xz.z * vel_xz.z
+    );
+
+    if (input_strength > 1.0f) {
+        vel_xz.x /= input_strength;
+        vel_xz.z /= input_strength;
+        input_strength = 1.0f;
+    }
+
+    if (input_strength > 0.01f) {
+        const float inv = 1.0f / std::max(input_strength, 1e-6f);
+        vel_xz.x *= inv;
+        vel_xz.z *= inv;
         g_player_yaw = atan2f(-vel_xz.x, -vel_xz.z);
     }
 
-    const float move_dx = vel_xz.x * MOVE_SPEED * dt;
-    const float move_dz = vel_xz.z * MOVE_SPEED * dt;
+    const float move_dx =
+        vel_xz.x * MOVE_SPEED * input_strength * dt;
+    const float move_dz =
+        vel_xz.z * MOVE_SPEED * input_strength * dt;
 
     // Resolver el desplazamiento en pequeños pasos evita atravesar
     // superficies finas cuando un frame produce un movimiento grande.
