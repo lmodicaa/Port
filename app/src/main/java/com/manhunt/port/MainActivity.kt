@@ -149,16 +149,19 @@ class MainActivity : Activity() {
         val aimSensitivityLabel = findViewById<TextView>(R.id.lbl_aim_sensitivity)
 
         fun refreshAimSensitivity() {
-            val level = aimSensitivity.progress.coerceIn(1, 30)
-            touchAimDistance = 42f - (level - 1) * (36f / 29f)
-            val sensitivity = 14f / touchAimDistance
-            aimSensitivityLabel.text = "Sensibilidad táctil: %.1fx".format(sensitivity)
+            val percent = aimSensitivity.progress.coerceIn(0, 100)
+            if (percent == 0) {
+                touchAimDistance = Float.POSITIVE_INFINITY
+            } else {
+                touchAimDistance = 60f - (percent * 0.54f)
+            }
+            aimSensitivityLabel.text = "Sensibilidad táctil: $percent%"
         }
 
         aimSensitivity.setOnSeekBarChangeListener(
             simpleSeekListener { refreshAimSensitivity() }
         )
-        aimSensitivity.progress = 14
+        aimSensitivity.progress = 50
         refreshAimSensitivity()
 
         toggle.setOnClickListener {
