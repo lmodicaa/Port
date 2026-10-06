@@ -1761,8 +1761,12 @@ static void setup_model() {
         g_col_spheres_world.clear();
 
         // El juego define qué COL usar mediante COLLISION_DATA en
-        // entityTypeData.ini. Probamos las ubicaciones usadas por MH1.
+        // entityTypeData.ini. En nuestro export de ManHunt.pak el
+        // archivo de Asylum está conservado en la misma estructura
+        // de directorios del PAK original.
         const char* type_data_paths[] = {
+            "export/ManHunt#pak/levels/Asylum/entityTypeData.ini",
+            "export/ManHunt#pak/levels/asylum/entityTypeData.ini",
             "entityTypeData.ini",
             "levels/GLOBAL/entityTypeData.ini",
             "levels/global/entityTypeData.ini",
