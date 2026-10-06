@@ -892,8 +892,6 @@ static float animation_root_motion_speed(const Animation* anim) {
 
 static bool is_looping_locomotion_animation(const Animation* anim) {
     if (!anim) return false;
-    if (g_debug_anim_idx == -2) return true;
-
     const std::string& n = anim->name;
     return n == "Stand_Idle" ||
            n == "Walk_Fwd" || n == "Walk_Bkw" ||
