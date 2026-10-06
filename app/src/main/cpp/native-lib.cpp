@@ -4715,6 +4715,20 @@ static float aim_zone_speed(float stick_distance, bool vertical) {
     d = std::max(0.0f, std::min(1.0f, d));
 
     float zone_pos = d * 10.0f;
+
+    // Durante el zoom el juego limita la zona máxima que puede usar
+    // el stick de apuntado. Zoom 1 -> ZONE 8, zoom 2 -> ZONE 5.
+    if (g_cam_zoom_level > 0) {
+        const int zoom_index =
+            std::max(0, std::min(1, g_cam_zoom_level - 1));
+        zone_pos = std::min(
+            zone_pos,
+            static_cast<float>(
+                g_player_control.zoom_max_zones[zoom_index]
+            )
+        );
+    }
+
     if (vertical) {
         zone_pos = std::min(zone_pos, g_player_control.vertical_aim_limit);
     }
@@ -4803,10 +4817,20 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
     }
 
     const float touch_multiplier = touch_mode ? g_touch_sensitivity : 1.0f;
-    const int zoom_index = std::max(0, std::min(1, g_cam_zoom_level - 1));
+    const int zoom_index =
+        std::max(0, std::min(1, g_cam_zoom_level - 1));
+    const bool moving_while_aiming =
+        std::sqrt(
+            g_move_fwd * g_move_fwd +
+            g_move_right * g_move_right
+        ) > 0.01f;
+    const float base_zoom_scale =
+        moving_while_aiming
+            ? g_player_control.zoom_aim_scale_moving
+            : g_player_control.zoom_aim_scale;
     const float zoom_aim_scale =
         g_cam_zoom_level > 0
-            ? g_player_control.zoom_aim_scale *
+            ? base_zoom_scale *
               g_player_control.zoom_move_scales[zoom_index]
             : 1.0f;
     const float horizontal_speed =
