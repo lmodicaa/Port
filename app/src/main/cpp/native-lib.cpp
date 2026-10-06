@@ -463,6 +463,29 @@ static std::vector<EntityInst> g_insts;
 // resource name to equal the render model name.
 static std::map<std::string, std::string> g_entity_collision_data;
 
+struct PlayerControlConfig {
+    float stick_dead_zone = 0.35f;
+    float move_walk_threshold = 0.53f;
+    float move_run_threshold = 0.96f;
+    float move_transition_speed = 0.20f;
+
+    float sneak_walk_speed = 1.20f;
+    float sneak_run_speed = 1.00f;
+    float walk_speed = 1.00f;
+    float run_speed = 1.00f;
+    float sprint_speed = 1.00f;
+    float crouch_forward_speed = 1.30f;
+    float crouch_backward_speed = 0.90f;
+    float crouch_sideways_speed = 1.20f;
+
+    float turn_pause = 0.27f;
+    float turn_acceleration = 4.0f;
+    float extra_turn_speed = 50.0f;
+    float run_threshold = 0.95f;
+};
+
+static PlayerControlConfig g_player_control;
+
 static Vec3 col_to_vec3(const ColVec3& v) {
     return {v.x, v.y, v.z};
 }
@@ -528,6 +551,7 @@ static void parse_entity_type_data(
     const std::vector<uint8_t>& raw
 ) {
     g_entity_collision_data.clear();
+    g_player_control = PlayerControlConfig{};
 
     if (raw.empty()) return;
 
@@ -585,11 +609,68 @@ static void parse_entity_type_data(
                     normalize_col_name(collision_name);
             }
         }
+
+        // La configuración de control del jugador vive dentro de
+        // RECORD player del entityTypeData.ini de cada nivel.
+        if (current_record == "player") {
+            const std::string lower_key = to_lower(key);
+
+            if (lower_key == "stick_dead_zone") {
+                parts >> g_player_control.stick_dead_zone;
+            } else if (lower_key == "move_thresholds") {
+                parts >>
+                    g_player_control.move_walk_threshold >>
+                    g_player_control.move_run_threshold;
+            } else if (lower_key == "move_trans_speed") {
+                parts >> g_player_control.move_transition_speed;
+            } else if (lower_key == "sneak_walk_speed") {
+                parts >> g_player_control.sneak_walk_speed;
+            } else if (lower_key == "sneak_run_speed") {
+                parts >> g_player_control.sneak_run_speed;
+            } else if (lower_key == "walk_speed") {
+                parts >> g_player_control.walk_speed;
+            } else if (lower_key == "run_speed") {
+                parts >> g_player_control.run_speed;
+            } else if (lower_key == "sprint_speed") {
+                parts >> g_player_control.sprint_speed;
+            } else if (lower_key == "crouch_forward_speed") {
+                parts >> g_player_control.crouch_forward_speed;
+            } else if (lower_key == "crouch_backward_speed") {
+                parts >> g_player_control.crouch_backward_speed;
+            } else if (lower_key == "crouch_sideways_speed") {
+                parts >> g_player_control.crouch_sideways_speed;
+            } else if (lower_key == "turn_pause") {
+                parts >> g_player_control.turn_pause;
+            } else if (lower_key == "turn_acceleration") {
+                parts >> g_player_control.turn_acceleration;
+            } else if (lower_key == "extra_turn_speed") {
+                parts >> g_player_control.extra_turn_speed;
+            } else if (lower_key == "run_threshold") {
+                parts >> g_player_control.run_threshold;
+            }
+        }
     }
 
     LOGI(
         "ENTITY TYPE DATA: %zu records con COLLISION_DATA",
         g_entity_collision_data.size()
+    );
+
+    LOGI(
+        "PLAYER CONTROL: deadZone=%.2f walkThreshold=%.2f "
+        "runThreshold=%.2f transition=%.2f "
+        "walkSpeed=%.2f runSpeed=%.2f sprintSpeed=%.2f "
+        "turnPause=%.2f turnAccel=%.2f extraTurn=%.2f",
+        g_player_control.stick_dead_zone,
+        g_player_control.move_walk_threshold,
+        g_player_control.move_run_threshold,
+        g_player_control.move_transition_speed,
+        g_player_control.walk_speed,
+        g_player_control.run_speed,
+        g_player_control.sprint_speed,
+        g_player_control.turn_pause,
+        g_player_control.turn_acceleration,
+        g_player_control.extra_turn_speed
     );
 }
 
@@ -2154,8 +2235,19 @@ static void setup_model() {
         // entityTypeData.ini. En nuestro export de ManHunt.pak el
         // archivo de Asylum está conservado en la misma estructura
         // de directorios del PAK original.
-        const char* type_data_paths[] = {
-            "export/ManHunt#pak/levels/Asylum/entityTypeData.ini",
+        // Cada nivel conserva su propio entityTypeData.ini. Por
+        // ahora el renderer está cargando Asylum, así que usamos su
+        // directorio como fuente principal y mantenemos los paths legacy
+        // solo como fallback.
+        const std::string level_name = "Asylum";
+
+        const std::vector<std::string> type_data_paths = {
+            "export/ManHunt#pak/levels/" +
+                level_name +
+                "/entityTypeData.ini",
+            "export/ManHunt#pak/levels/" +
+                level_name +
+                "/entityTypeData.INI",
             "export/ManHunt#pak/levels/asylum/entityTypeData.ini",
             "entityTypeData.ini",
             "levels/GLOBAL/entityTypeData.ini",
@@ -2165,15 +2257,18 @@ static void setup_model() {
         };
 
         g_entity_collision_data.clear();
-        for (const char* type_path : type_data_paths) {
-            auto type_raw = read_asset(type_path);
+        g_player_control = PlayerControlConfig{};
+
+        for (const auto& type_path : type_data_paths) {
+            auto type_raw = read_asset(type_path.c_str());
             if (!type_raw.empty()) {
                 LOGI(
                     "ENTITY TYPE DATA cargado: %s (%zu bytes)",
-                    type_path,
+                    type_path.c_str(),
                     type_raw.size()
                 );
                 parse_entity_type_data(type_raw);
+
                 if (!g_entity_collision_data.empty()) {
                     break;
                 }
@@ -2298,31 +2393,71 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         vec3_scale(right_xz, g_move_right)
     );
 
-    // No convertir cualquier toque del joystick en velocidad máxima.
-    // Conservamos la magnitud analógica para que caminar despacio sea
-    // realmente posible y el máximo solo aparezca al llevarlo al borde.
-    float input_strength = sqrtf(
+    // Aplicar el dead zone del stick original. El juego recalibra la
+    // distancia para que el borde de la zona muerta sea el nuevo 0.
+    float raw_input_strength = sqrtf(
         vel_xz.x * vel_xz.x +
         vel_xz.z * vel_xz.z
     );
 
-    if (input_strength > 1.0f) {
-        vel_xz.x /= input_strength;
-        vel_xz.z /= input_strength;
-        input_strength = 1.0f;
+    raw_input_strength = std::min(
+        raw_input_strength,
+        1.0f
+    );
+
+    float input_strength = 0.0f;
+
+    if (raw_input_strength > g_player_control.stick_dead_zone) {
+        input_strength =
+            (raw_input_strength -
+             g_player_control.stick_dead_zone) /
+            std::max(
+                0.001f,
+                1.0f - g_player_control.stick_dead_zone
+            );
+
+        input_strength = std::max(
+            0.0f,
+            std::min(1.0f, input_strength)
+        );
     }
 
     if (input_strength > 0.01f) {
-        const float inv = 1.0f / std::max(input_strength, 1e-6f);
-        vel_xz.x *= inv;
-        vel_xz.z *= inv;
-        g_player_yaw = atan2f(-vel_xz.x, -vel_xz.z);
+        // Mantener dirección, pero usar la intensidad recalibrada.
+        const float inv =
+            1.0f / std::max(raw_input_strength, 1e-6f);
+
+        vel_xz.x *= inv * input_strength;
+        vel_xz.z *= inv * input_strength;
+
+        g_player_yaw = atan2f(
+            -vel_xz.x,
+            -vel_xz.z
+        );
+    } else {
+        vel_xz = {0.0f, 0.0f, 0.0f};
+    }
+
+    // MOVE_THRESHOLDS del juego define las zonas del stick:
+    // por debajo de walk = movimiento lento, entre walk/run = walk,
+    // y desde run = run. Sprint todavía no tiene botón dedicado en
+    // nuestro control, así que el máximo analógico llega hasta run.
+    float movement_multiplier = g_player_control.walk_speed;
+
+    if (input_strength < g_player_control.move_walk_threshold) {
+        movement_multiplier =
+            g_player_control.sneak_walk_speed;
+    } else if (input_strength >=
+               g_player_control.move_run_threshold ||
+               input_strength >= g_player_control.run_threshold) {
+        movement_multiplier =
+            g_player_control.run_speed;
     }
 
     const float move_dx =
-        vel_xz.x * MOVE_SPEED * input_strength * dt;
+        vel_xz.x * MOVE_SPEED * movement_multiplier * dt;
     const float move_dz =
-        vel_xz.z * MOVE_SPEED * input_strength * dt;
+        vel_xz.z * MOVE_SPEED * movement_multiplier * dt;
 
     // Resolver el desplazamiento en pequeños pasos evita atravesar
     // superficies finas cuando un frame produce un movimiento grande.
