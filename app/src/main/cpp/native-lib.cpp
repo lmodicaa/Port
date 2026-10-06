@@ -107,14 +107,11 @@ static Mat4 mat4_from_pos_yaw(Vec3 pos, float yaw) {
 }
 
 static Mat4 mat4_from_pos_cash(Vec3 pos, float yaw) {
-    // Cash was authored with Z-up local coordinates while the runtime
-    // uses Y-up. Convert local Z-up -> runtime Y-up first, then apply
-    // the gameplay yaw around the runtime Y axis.
+    // Baseline established during visual calibration:
+    // Cash needs a Z-up -> Y-up axis conversion plus the runtime yaw.
     const float cy = cosf(yaw);
     const float sy = sinf(yaw);
 
-    // R = Ry(yaw) * Rx(-90°)
-    // Local up (+Z) becomes runtime up (+Y).
     Mat4 r = {0};
     r.m[0] = cy;
     r.m[1] = 0.0f;
@@ -298,6 +295,38 @@ static float g_cash_y_offset = 1.0f;
 // el frente del DFF debe girarse 90 grados para alinearlo con
 // el forward del jugador (-Z en yaw=0).
 static constexpr float CASH_MODEL_YAW_OFFSET = -1.57079632679f;
+static Vec3 g_cash_pos_adjust = {0.0f, 0.0f, 0.0f};
+static Vec3 g_cash_rot_adjust_deg = {0.0f, 0.0f, 0.0f};
+
+static Mat4 mat4_rotate_x(float angle) {
+    const float c = cosf(angle), s = sinf(angle);
+    Mat4 r = mat4_identity();
+    r.m[5] = c;
+    r.m[6] = s;
+    r.m[9] = -s;
+    r.m[10] = c;
+    return r;
+}
+
+static Mat4 mat4_rotate_y(float angle) {
+    const float c = cosf(angle), s = sinf(angle);
+    Mat4 r = mat4_identity();
+    r.m[0] = c;
+    r.m[2] = -s;
+    r.m[8] = s;
+    r.m[10] = c;
+    return r;
+}
+
+static Mat4 mat4_rotate_z(float angle) {
+    const float c = cosf(angle), s = sinf(angle);
+    Mat4 r = mat4_identity();
+    r.m[0] = c;
+    r.m[1] = s;
+    r.m[4] = -s;
+    r.m[5] = c;
+    return r;
+}
 static DFFModel g_cash_model;
 static float g_player_yaw = 0.0f;
 static float g_anim_time = 0.f;
@@ -878,6 +907,8 @@ Java_com_manhunt_port_ManhuntRenderer_nativeInit(JNIEnv* env, jobject, jobject a
     // deformar el modelo al iniciar la aplicación.
     g_debug_anim_idx = -1;
     g_cash_skinning_enabled = false;
+    g_cash_pos_adjust = {0.0f, 0.0f, 0.0f};
+    g_cash_rot_adjust_deg = {0.0f, 0.0f, 0.0f};
 }
 
 JNIEXPORT void JNICALL
@@ -1441,12 +1472,37 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
          */
         Vec3 center_pos = vec3_add(
             g_player_pos,
-            { 0.0f, g_cash_y_offset, 0.0f }
+            {
+                g_cash_pos_adjust.x,
+                g_cash_y_offset + g_cash_pos_adjust.y,
+                g_cash_pos_adjust.z
+            }
         );
         Mat4 cash_model_m = mat4_from_pos_cash(
             center_pos,
             g_player_yaw + CASH_MODEL_YAW_OFFSET
         );
+
+        // Temporary visual-calibration rotation, applied after the
+        // established baseline transform so the menu can tune local axes.
+        const float rx = g_cash_rot_adjust_deg.x * 0.017453292519943f;
+        const float ry = g_cash_rot_adjust_deg.y * 0.017453292519943f;
+        const float rz = g_cash_rot_adjust_deg.z * 0.017453292519943f;
+        const Mat4 extra_rot = mat4_mul(
+            mat4_mul(mat4_rotate_z(rz), mat4_rotate_y(ry)),
+            mat4_rotate_x(rx)
+        );
+
+        const Mat4 translation_only = [&]() {
+            Mat4 t = mat4_identity();
+            t.m[12] = center_pos.x;
+            t.m[13] = center_pos.y;
+            t.m[14] = center_pos.z;
+            return t;
+        }();
+
+        (void)translation_only;
+        cash_model_m = mat4_mul(cash_model_m, extra_rot);
         Mat4 cash_mvp = mat4_mul(
             vp,
             cash_model_m
@@ -1570,6 +1626,21 @@ Java_com_manhunt_port_ManhuntRenderer_nativeNextDebugAnimation(JNIEnv*, jobject)
 }
 
 // Saltar
+JNIEXPORT void JNICALL
+Java_com_manhunt_port_ManhuntRenderer_nativeSetCashTransform(
+    JNIEnv*,
+    jobject,
+    jfloat px,
+    jfloat py,
+    jfloat pz,
+    jfloat rx,
+    jfloat ry,
+    jfloat rz
+) {
+    g_cash_pos_adjust = {px, py, pz};
+    g_cash_rot_adjust_deg = {rx, ry, rz};
+}
+
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeJump(JNIEnv*, jobject) {
     if (g_on_ground) {
