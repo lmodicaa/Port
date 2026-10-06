@@ -61,8 +61,8 @@ class MainActivity : Activity() {
                         } else {
                             // Lado derecho → mirar
                             rightPointerId = pId
-                            rightStartX    = px
-                            rightStartY    = py
+                            rightLastX     = px
+                            rightLastY     = py
                             renderer.nativeLook(0f, 0f)
                         }
                     }
