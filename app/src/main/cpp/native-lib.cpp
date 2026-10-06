@@ -896,6 +896,88 @@ static float animation_root_motion_speed(const Animation* anim) {
     return 0.0f;
 }
 
+static bool animation_root_motion_delta(
+    const Animation* anim,
+    float time0,
+    float dt,
+    Vec3* out_delta
+) {
+    *out_delta = {0.0f, 0.0f, 0.0f};
+    if (!anim || anim->duration <= 0.0001f || dt <= 0.0f) return false;
+
+    const AnimationTrack* root_track = nullptr;
+    for (const auto& track : anim->tracks) {
+        if (track.bone_id == 1000 &&
+            track.keyframes.size() >= 2 &&
+            (track.frame_type == 2 || track.frame_type == 3)) {
+            root_track = &track;
+            break;
+        }
+    }
+    if (!root_track) return false;
+
+    const auto sample_root = [&](float t) -> Vec3 {
+        if (t <= root_track->keyframes.front().time) {
+            const auto& k = root_track->keyframes.front();
+            return {k.tx, k.ty, k.tz};
+        }
+
+        if (t >= root_track->keyframes.back().time) {
+            const auto& k = root_track->keyframes.back();
+            return {k.tx, k.ty, k.tz};
+        }
+
+        for (size_t i = 0; i + 1 < root_track->keyframes.size(); ++i) {
+            const auto& a = root_track->keyframes[i];
+            const auto& b = root_track->keyframes[i + 1];
+            if (t >= a.time && t <= b.time) {
+                const float span = b.time - a.time;
+                const float u = span > 0.000001f
+                    ? std::max(0.0f, std::min(1.0f, (t - a.time) / span))
+                    : 0.0f;
+                return {
+                    a.tx + (b.tx - a.tx) * u,
+                    a.ty + (b.ty - a.ty) * u,
+                    a.tz + (b.tz - a.tz) * u
+                };
+            }
+        }
+
+        const auto& k = root_track->keyframes.back();
+        return {k.tx, k.ty, k.tz};
+    };
+
+    float start = fmodf(time0, anim->duration);
+    if (start < 0.0f) start += anim->duration;
+
+    float end = start + dt;
+    Vec3 p0 = sample_root(start);
+    Vec3 p1;
+
+    if (end <= anim->duration) {
+        p1 = sample_root(end);
+        *out_delta = {
+            p1.x - p0.x,
+            p1.y - p0.y,
+            p1.z - p0.z
+        };
+        return true;
+    }
+
+    // El ciclo cruza el final de la animación: conservar el tramo final
+    // y sumar el tramo desde el primer frame del siguiente ciclo.
+    const Vec3 pend = sample_root(anim->duration);
+    const Vec3 pstart = sample_root(0.0f);
+    const Vec3 pnext = sample_root(end - anim->duration);
+
+    *out_delta = {
+        (pend.x - p0.x) + (pnext.x - pstart.x),
+        (pend.y - p0.y) + (pnext.y - pstart.y),
+        (pend.z - p0.z) + (pnext.z - pstart.z)
+    };
+    return true;
+}
+
 static bool is_looping_locomotion_animation(const Animation* anim) {
     if (!anim) return false;
     const std::string& n = anim->name;
@@ -3031,23 +3113,59 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         vel_xz = {0.0f, 0.0f, 0.0f};
     }
 
-    // La animación elegida contiene el desplazamiento original del ciclo.
-    // Usarlo como velocidad mantiene sincronizados pasos y desplazamiento.
-    const float root_motion_speed =
-        locomotion_root_motion_speed(
-            input_strength,
-            vel_xz
+    // Usar el delta real del nodo root de HAnim para este frame.
+    // La versión anterior calculaba distance/duration, lo que producía
+    // pequeñas diferencias entre los pasos y el desplazamiento del actor.
+    Vec3 root_delta_local{};
+    const bool have_root_delta =
+        locomotion_root_motion_delta(
+            [&]() -> const Animation* {
+                const float local_fwd =
+                    vel_xz.x * fwd_xz.x + vel_xz.z * fwd_xz.z;
+                const float local_right =
+                    vel_xz.x * right_xz.x + vel_xz.z * right_xz.z;
+
+                const bool forward_axis =
+                    std::fabs(local_fwd) >= std::fabs(local_right);
+                const char* direction =
+                    forward_axis
+                        ? (local_fwd >= 0.0f ? "Fwd" : "Bkw")
+                        : (local_right >= 0.0f ? "Right" : "Left");
+
+                const char* family =
+                    g_sprint_pressed ? "Sprint_" :
+                    (g_sneak_pressed ? "Sneak_Walk_" : "Walk_");
+
+                const std::string wanted =
+                    std::string(family) + direction;
+
+                for (const auto& pair : g_anims) {
+                    if (to_lower(pair.first) == to_lower(wanted)) {
+                        return &pair.second;
+                    }
+                }
+                return nullptr;
+            }(),
+            g_anim_time,
+            dt,
+            &root_delta_local
         );
 
+    float root_distance = 0.0f;
+    if (have_root_delta) {
+        root_distance = sqrtf(
+            root_delta_local.x * root_delta_local.x +
+            root_delta_local.z * root_delta_local.z
+        );
+    }
+
     const float movement_speed =
-        root_motion_speed > 0.0001f
-            ? root_motion_speed
+        root_distance > 0.0001f
+            ? root_distance / std::max(dt, 0.0001f)
             : MOVE_SPEED_FALLBACK;
 
-    const float move_dx =
-        vel_xz.x * movement_speed * dt;
-    const float move_dz =
-        vel_xz.z * movement_speed * dt;
+    const float move_dx = vel_xz.x * movement_speed * dt;
+    const float move_dz = vel_xz.z * movement_speed * dt;
 
     // Resolver el desplazamiento en pequeños pasos evita atravesar
     // superficies finas cuando un frame produce un movimiento grande.
