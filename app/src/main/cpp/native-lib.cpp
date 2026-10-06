@@ -265,7 +265,7 @@ static float g_cash_y_offset = 1.0f;
 // El modelo Cash usa un eje frontal distinto al del runtime:
 // el frente del DFF debe girarse 90 grados para alinearlo con
 // el forward del jugador (-Z en yaw=0).
-static constexpr float CASH_MODEL_YAW_OFFSET = 1.57079632679f;
+static constexpr float CASH_MODEL_YAW_OFFSET = -1.57079632679f;
 static DFFModel g_cash_model;
 static float g_player_yaw = 0.0f;
 static float g_anim_time = 0.f;
