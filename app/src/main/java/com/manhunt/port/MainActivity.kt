@@ -139,6 +139,24 @@ class MainActivity : Activity() {
             renderer.nativeJump()
         }
 
+        val sprintButton = findViewById<android.widget.Button>(R.id.btn_sprint)
+        sprintButton.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> renderer.nativeSetSprint(true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> renderer.nativeSetSprint(false)
+            }
+            true
+        }
+
+        val sneakButton = findViewById<android.widget.Button>(R.id.btn_sneak)
+        sneakButton.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> renderer.nativeSetSneak(true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> renderer.nativeSetSneak(false)
+            }
+            true
+        }
+
         setupCashCalibrationPanel()
     }
 
