@@ -755,7 +755,9 @@ static float g_cam_dist   = 3.0f;
 // La animación nunca modifica g_player_yaw: el giro físico del actor sigue
 // siendo independiente, como en el juego original.
 static int g_turn_anim_request = 0; // -1 izquierda, +1 derecha
-static float g_turn_hold_time = 0.0f;
+// Sentido del último arrastre horizontal continuo. Evita reiniciar
+// Stand_Turn_* en cada ACTION_MOVE mientras el dedo sigue apoyado.
+static int g_turn_input_sign = 0;
 
 // Movimiento joystick (actualizados desde Kotlin)
 static float g_move_fwd   = 0.f;  // -1..1  (adelante/atrás)
@@ -4405,11 +4407,16 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
     const float SENS = 0.003f;
 
     // El arrastre horizontal también alimenta el estado visual de giro.
-    // No usamos la animación para calcular el yaw: solo reproduce la pose
-    // original correspondiente al sentido del giro.
+    // Importante: nativeLook recibe muchos eventos mientras el dedo sigue
+    // apoyado. No debemos reiniciar Stand_Turn_* en cada evento; la animación
+    // original es una transición de giro, no un loop.
     if (std::fabs(dx) > 0.5f) {
-        g_turn_anim_request = (dx > 0.0f) ? 1 : -1;
-        g_turn_hold_time = 0.0f;
+        const int turn_sign = (dx > 0.0f) ? 1 : -1;
+
+        if (turn_sign != g_turn_input_sign) {
+            g_turn_anim_request = turn_sign;
+            g_turn_input_sign = turn_sign;
+        }
     }
 
     // Arrastrar hacia la derecha hace girar la cámara/personaje hacia
