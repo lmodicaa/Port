@@ -30,7 +30,7 @@ class MainActivity : Activity() {
     private var rightLastY = 0f
     // Sensibilidad del arrastre táctil: píxeles de desplazamiento para alcanzar
     // la velocidad máxima de la zona de apuntado.
-    private val TOUCH_AIM_DISTANCE = 14f
+    private var touchAimDistance = 14f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -95,8 +95,8 @@ class MainActivity : Activity() {
                                     rightLastX = cx
                                     rightLastY = cy
 
-                                    val nx = (dx / TOUCH_AIM_DISTANCE).coerceIn(-1f, 1f)
-                                    val ny = (dy / TOUCH_AIM_DISTANCE).coerceIn(-1f, 1f)
+                                    val nx = (dx / touchAimDistance).coerceIn(-1f, 1f)
+                                    val ny = (dy / touchAimDistance).coerceIn(-1f, 1f)
 
                                     renderer.nativeLook(nx, ny, true)
                                 }
@@ -151,6 +151,8 @@ class MainActivity : Activity() {
         val toggle = findViewById<Button>(R.id.btn_adjust)
         val reset = findViewById<Button>(R.id.btn_reset_adjust)
         val copy = findViewById<Button>(R.id.btn_copy_adjust)
+        val aimSensitivity = findViewById<SeekBar>(R.id.seek_aim_sensitivity)
+        val aimSensitivityLabel = findViewById<TextView>(R.id.lbl_aim_sensitivity)
 
         val labels = arrayOf(
             findViewById<TextView>(R.id.lbl_pos_x),
@@ -206,6 +208,18 @@ class MainActivity : Activity() {
                 simpleSeekListener { refreshFromBars() }
             )
         }
+
+        fun refreshAimSensitivity() {
+            touchAimDistance = aimSensitivity.progress.toFloat().coerceAtLeast(5f)
+            val sensitivity = 100f / touchAimDistance
+            aimSensitivityLabel.text = "Sensibilidad táctil: %.1fx".format(sensitivity)
+        }
+
+        aimSensitivity.setOnSeekBarChangeListener(
+            simpleSeekListener { refreshAimSensitivity() }
+        )
+        aimSensitivity.progress = 14
+        refreshAimSensitivity()
 
         toggle.setOnClickListener {
             panel.visibility =
