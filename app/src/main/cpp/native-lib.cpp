@@ -1909,20 +1909,71 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         g_player_yaw = atan2f(-vel_xz.x, -vel_xz.z);
     }
 
-    float nx = g_player_pos.x + vel_xz.x * MOVE_SPEED * dt;
-    float nz = g_player_pos.z + vel_xz.z * MOVE_SPEED * dt;
-    float waist_y = g_player_pos.y + 1.0f;
+    const float move_dx = vel_xz.x * MOVE_SPEED * dt;
+    const float move_dz = vel_xz.z * MOVE_SPEED * dt;
 
-    if (hit_wall(g_player_pos.x, waist_y, g_player_pos.z, nx, waist_y, nz)) {
-        if (!hit_wall(g_player_pos.x, waist_y, g_player_pos.z, nx, waist_y, g_player_pos.z)) {
-            g_player_pos.x = nx;
-        } else if (!hit_wall(g_player_pos.x, waist_y, g_player_pos.z, g_player_pos.x, waist_y, nz)) {
-            g_player_pos.z = nz;
+    // Resolver el desplazamiento en pequeños pasos evita atravesar
+    // superficies finas cuando un frame produce un movimiento grande.
+    // La detección sigue usando las 2 esferas + línea del COL "player".
+    const float move_distance = sqrtf(
+        move_dx * move_dx +
+        move_dz * move_dz
+    );
+    const float max_collision_step = 0.10f;
+    const int move_steps = std::max(
+        1,
+        std::min(
+            16,
+            static_cast<int>(
+                std::ceil(move_distance / max_collision_step)
+            )
+        )
+    );
+
+    const float step_dx = move_dx / static_cast<float>(move_steps);
+    const float step_dz = move_dz / static_cast<float>(move_steps);
+
+    for (int step = 0; step < move_steps; ++step) {
+        const float current_waist_y = g_player_pos.y + 1.0f;
+        const float wanted_x = g_player_pos.x + step_dx;
+        const float wanted_z = g_player_pos.z + step_dz;
+
+        if (!hit_wall(
+                g_player_pos.x,
+                current_waist_y,
+                g_player_pos.z,
+                wanted_x,
+                current_waist_y,
+                wanted_z)) {
+            g_player_pos.x = wanted_x;
+            g_player_pos.z = wanted_z;
+            continue;
         }
-    } else {
-        g_player_pos.x = nx;
-        g_player_pos.z = nz;
+
+        // El juego permite continuar por el eje que esté libre,
+        // produciendo el deslizamiento natural contra la pared.
+        if (!hit_wall(
+                g_player_pos.x,
+                current_waist_y,
+                g_player_pos.z,
+                wanted_x,
+                current_waist_y,
+                g_player_pos.z)) {
+            g_player_pos.x = wanted_x;
+        }
+
+        if (!hit_wall(
+                g_player_pos.x,
+                current_waist_y,
+                g_player_pos.z,
+                g_player_pos.x,
+                current_waist_y,
+                wanted_z)) {
+            g_player_pos.z = wanted_z;
+        }
     }
+
+    const float waist_y = g_player_pos.y + 1.0f;
 
     // Gravedad
     g_vel_y += GRAVITY * dt;
