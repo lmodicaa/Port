@@ -866,9 +866,61 @@ struct PlayerControlConfig {
     float extra_turn_speed = 50.0f;
     float max_quick_turn_speed = 60.0f;
     float run_threshold = 0.95f;
+
+    // Player stamina from Manhunt EntityTypeData.ini.
+    float stamina_total_sprint_time = 20.0f;
+    float stamina_no_sprint_time = 3.0f;
+    float stamina_recovery_moving = 54.0f;
+    float stamina_recovery_running = 80.0f;
+    float stamina_recovery_still = 22.0f;
+    float stamina_recovery_pause = 0.0f;
 };
 
 static PlayerControlConfig g_player_control;
+static float g_stamina_remaining = 20.0f;
+static float g_stamina_recovery_delay = 0.0f;
+
+static bool sprint_is_active() {
+    return g_sprint_pressed &&
+           g_stamina_remaining > g_player_control.stamina_no_sprint_time;
+}
+
+static void update_player_stamina(float dt, bool moving) {
+    if (dt <= 0.0f) return;
+
+    const float total =
+        std::max(0.001f, g_player_control.stamina_total_sprint_time);
+
+    if (g_sprint_pressed && moving &&
+        g_stamina_remaining > 0.0f) {
+        g_stamina_remaining =
+            std::max(0.0f, g_stamina_remaining - dt);
+        g_stamina_recovery_delay =
+            std::max(0.0f, g_player_control.stamina_recovery_pause);
+        return;
+    }
+
+    if (g_stamina_recovery_delay > 0.0f) {
+        g_stamina_recovery_delay =
+            std::max(0.0f, g_stamina_recovery_delay - dt);
+        return;
+    }
+
+    if (g_stamina_remaining >= total) {
+        g_stamina_remaining = total;
+        return;
+    }
+
+    const float recovery_seconds = moving
+        ? g_player_control.stamina_recovery_moving
+        : g_player_control.stamina_recovery_still;
+
+    const float recovery =
+        total / std::max(0.001f, recovery_seconds);
+
+    g_stamina_remaining =
+        std::min(total, g_stamina_remaining + recovery * dt);
+}
 
 static float animation_root_motion_speed(const Animation* anim) {
     if (!anim || anim->duration <= 0.0001f) return 0.0f;
@@ -1031,7 +1083,7 @@ static float locomotion_root_motion_speed(
     // El joystick ya no selecciona estados de acción por intensidad.
     // La locomoción normal siempre es WALK; Sprint y Sneak solo se
     // activan desde sus botones dedicados.
-    if (g_sprint_pressed) {
+    if (sprint_is_active()) {
         family = "Sprint_";
     } else if (g_sneak_pressed) {
         family = "Sneak_Walk_";
@@ -1259,9 +1311,25 @@ static void parse_entity_type_data(
                 parts >> g_player_control.max_quick_turn_speed;
             } else if (lower_key == "run_threshold") {
                 parts >> g_player_control.run_threshold;
+            } else if (lower_key == "stamina_total_sprint_time") {
+                parts >> g_player_control.stamina_total_sprint_time;
+            } else if (lower_key == "stamina_no_sprint_time") {
+                parts >> g_player_control.stamina_no_sprint_time;
+            } else if (lower_key == "stamina_recovery_moving") {
+                parts >> g_player_control.stamina_recovery_moving;
+            } else if (lower_key == "stamina_recovery_running") {
+                parts >> g_player_control.stamina_recovery_running;
+            } else if (lower_key == "stamina_recovery_still") {
+                parts >> g_player_control.stamina_recovery_still;
+            } else if (lower_key == "stamina_recovery_pause") {
+                parts >> g_player_control.stamina_recovery_pause;
             }
         }
     }
+
+    g_stamina_remaining =
+        std::max(0.001f, g_player_control.stamina_total_sprint_time);
+    g_stamina_recovery_delay = 0.0f;
 
     LOGI(
         "ENTITY TYPE DATA: %zu records con COLLISION_DATA",
@@ -3096,6 +3164,8 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         );
     }
 
+    update_player_stamina(dt, input_strength > 0.01f);
+
     if (input_strength > 0.01f) {
         // Superado el dead-zone, la velocidad la determina la animación.
         // No reducimos el desplazamiento por la posición del joystick:
@@ -3133,7 +3203,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                         : (local_right >= 0.0f ? "Right" : "Left");
 
                 const char* family =
-                    g_sprint_pressed ? "Sprint_" :
+                    sprint_is_active() ? "Sprint_" :
                     (g_sneak_pressed ? "Sneak_Walk_" : "Walk_");
 
                 const std::string wanted =
@@ -3161,7 +3231,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         // Mantener los multiplicadores originales de EntityTypeData.
         if (g_sneak_pressed) {
             root_distance *= g_player_control.sneak_walk_speed;
-        } else if (g_sprint_pressed) {
+        } else if (sprint_is_active()) {
             root_distance *= g_player_control.sprint_speed;
         } else {
             root_distance *= g_player_control.walk_speed;
