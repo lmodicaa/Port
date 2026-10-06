@@ -3528,25 +3528,26 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     };
 
     const float effective_pitch = g_cam_pitch + g_cam_stair_pitch;
-    const float zoomed_cam_dist =
-        g_cam_dist / std::max(1.0f, g_cam_zoom_factor);
 
+    // ZOOM_LEVELS son factores de magnificación. Mantener la distancia
+    // física de la cámara evita clipping del personaje; el acercamiento
+    // se consigue estrechando el FOV como una cámara óptica.
     Vec3 cam_pos;
     cam_pos.x =
         g_player_pos.x +
         sinf(g_cam_yaw) *
         cosf(effective_pitch) *
-        zoomed_cam_dist;
+        g_cam_dist;
     cam_pos.y =
         g_player_pos.y +
         1.5f -
         sinf(effective_pitch) *
-        zoomed_cam_dist;
+        g_cam_dist;
     cam_pos.z =
         g_player_pos.z +
-        cosf(g_cam_yaw) *
         cosf(effective_pitch) *
-        zoomed_cam_dist;
+        cosf(g_cam_yaw) *
+        g_cam_dist;
 
     // Cámara de tercera persona: si una pared queda entre Cash y la
     // posición deseada de la cámara, acercamos la cámara al jugador en
@@ -3665,7 +3666,20 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     if (!g_program || !g_vao || g_groups.empty()) return;
 
     float aspect = g_height > 0 ? (float)g_width / (float)g_height : 1.f;
-    Mat4 proj = mat4_perspective(1.22f, aspect, 0.1f, 800.f);
+    const float base_fov_y = 1.22f;
+    const float zoom_magnification =
+        std::max(1.0f, g_cam_zoom_factor);
+    const float effective_fov_y =
+        2.0f * atanf(
+            tanf(base_fov_y * 0.5f) /
+            zoom_magnification
+        );
+    Mat4 proj = mat4_perspective(
+        effective_fov_y,
+        aspect,
+        0.1f,
+        800.f
+    );
     Mat4 view = mat4_look_at(cam_pos, target, {0.f, 1.f, 0.f});
     Mat4 model_m = mat4_identity();
     Mat4 mvp = mat4_mul(mat4_mul(proj, view), model_m);
