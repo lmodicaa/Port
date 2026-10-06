@@ -30,6 +30,7 @@ class ManhuntRenderer(private val assets: AssetManager, private val gamePath: St
 
     external fun nativeMove(fwd: Float, right: Float)
     external fun nativeLook(dx: Float, dy: Float, touchMode: Boolean)
+    external fun nativeSetTouchSensitivity(percent: Float)
     external fun nativeJump()
     external fun nativeNextDebugAnimation()
     external fun nativeSetCashTransform(
