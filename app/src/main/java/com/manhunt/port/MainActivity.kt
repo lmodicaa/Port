@@ -158,7 +158,7 @@ class MainActivity : Activity() {
         )
 
         var posX = 0f
-        var posY = 0f
+        var posY = 1f
         var posZ = 0f
         var rotX = 0f
         var rotY = -91f
@@ -232,7 +232,7 @@ class MainActivity : Activity() {
 
         // Valores finales de calibración.
         bars[0].progress = 300
-        bars[1].progress = 300
+        bars[1].progress = 400
         bars[2].progress = 300
         bars[3].progress = 180
         bars[4].progress = 89
