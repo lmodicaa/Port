@@ -40,21 +40,6 @@
             android:background="#80000000"
             android:textColor="#FFFFFF" />
 
-        <Button
-            android:id="@+id/btn_recenter"
-            android:layout_width="80dp"
-            android:layout_height="58dp"
-            android:text="Centrar"
-            android:background="#80000000"
-            android:textColor="#FFFFFF" />
-
-        <Button
-            android:id="@+id/btn_zoom"
-            android:layout_width="80dp"
-            android:layout_height="58dp"
-            android:text="Zoom"
-            android:background="#80000000"
-            android:textColor="#FFFFFF" />
 
 
 
