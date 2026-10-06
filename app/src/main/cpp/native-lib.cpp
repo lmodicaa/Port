@@ -3986,7 +3986,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             // La intensidad del joystick ya no convierte automáticamente
             // Walk en Run ni en Sneak.
             const char* family = nullptr;
-            if (g_sprint_pressed && animation_input > 0.01f) {
+            if (sprint_is_active() && animation_input > 0.01f) {
                 family = "Sprint_";
             } else if (g_sneak_pressed && animation_input > 0.01f) {
                 family = "Sneak_Walk_";
