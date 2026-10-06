@@ -4136,11 +4136,17 @@ Java_com_manhunt_port_ManhuntRenderer_nativeMove(JNIEnv*, jobject, jfloat fwd, j
     g_move_right = right;
 }
 
-// Arrastrar para mirar (lado derecho de pantalla)
+// Arrastrar para mirar (lado derecho de pantalla).
+// Manhunt usa por defecto una cámara "fixed behind": el giro horizontal
+// rota al personaje y la cámara permanece detrás de él. No dejamos que
+// la cámara orbite libremente alrededor de Cash.
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jfloat dy) {
     const float SENS = 0.003f;
-    g_cam_yaw   += dx * SENS;
+
+    g_player_yaw += dx * SENS;
+    g_cam_yaw = g_player_yaw;
+
     g_cam_pitch -= dy * SENS;
     g_cam_pitch = std::max(-1.4f, std::min(1.4f, g_cam_pitch));
 }
