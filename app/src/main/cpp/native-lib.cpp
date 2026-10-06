@@ -749,8 +749,6 @@ static float g_previous_anim_time = 0.0f;
 static float g_anim_transition_time = 0.0f;
 static float g_cam_yaw    = 0.0f;
 static float g_cam_pitch  = -0.2f;
-static float g_idle_turn_amount = 0.0f;
-static int g_idle_turn_sign = 0;
 static float g_cam_dist   = 3.0f;
 
 // El yaw del actor es la orientación real. El mouse/touch del PC gira
@@ -3575,16 +3573,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 std::string wanted = std::string(family) + direction;
                 anim = find_anim(wanted.c_str());
             } else {
-                // Giro corporal mientras Cash permanece quieto.
-                if (g_idle_turn_amount >= 0.20f) {
-                    anim = find_anim(
-                        g_idle_turn_sign > 0
-                            ? "Stand_Turn_Right"
-                            : "Stand_Turn_Left"
-                    );
-                    g_idle_turn_amount = 0.0f;
-                }
-                if (!anim) anim = find_anim("Stand");
+                // Sin movimiento: mantener la postura de espera. El yaw del
+                // actor ya responde directamente al mouse/touch.
+                anim = find_anim("Stand");
                 if (!anim) anim = find_anim("Stand_Idle");
             }
 
@@ -4400,10 +4391,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat dx, jf
 
     // Arrastrar hacia la derecha hace girar la cámara/personaje hacia
     // la derecha; arrastrar hacia arriba hace mirar hacia arriba.
-    if (dx != 0.0f) {
-        g_idle_turn_amount += fabsf(dx * SENS);
-        g_idle_turn_sign = dx > 0.0f ? 1 : -1;
-    }
     g_player_yaw -= dx * SENS;
     g_cam_yaw = g_player_yaw;
 
