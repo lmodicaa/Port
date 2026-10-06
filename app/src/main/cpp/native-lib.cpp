@@ -775,137 +775,56 @@ static bool is_looping_locomotion_animation(const Animation* anim) {
            n == "Sprint_Left" || n == "Sprint_Right";
 }
 
-static const Animation* find_locomotion_animation(float animation_input, Vec3 vel_xz) {
-    if (animation_input <= 0.01f) return nullptr;
+static float locomotion_root_motion_speed(
+    float animation_input,
+    Vec3 vel_xz
+) {
+    if (animation_input <= 0.01f) return 0.0f;
 
     auto find_anim = [&](const char* wanted) -> const Animation* {
         const std::string query = to_lower(wanted);
         for (const auto& pair : g_anims) {
-            if (to_lower(pair.first) == query) return &pair.second;
+            if (to_lower(pair.first) == query) {
+                return &pair.second;
+            }
         }
         return nullptr;
     };
 
-    const float cy = cosf(g_player_yaw);
-    const float sy = sinf(g_player_yaw);
-    const Vec3 fwd = {-sy, 0.0f, -cy};
-    const Vec3 right = {cy, 0.0f, -sy};
-    const float local_fwd = vel_xz.x * fwd.x + vel_xz.z * fwd.z;
-    const float local_right = vel_xz.x * right.x + vel_xz.z * right.z;
+    const float player_cy = cosf(g_player_yaw);
+    const float player_sy = sinf(g_player_yaw);
+    const Vec3 player_fwd = {-player_sy, 0.0f, -player_cy};
+    const Vec3 player_right = {player_cy, 0.0f, -player_sy};
+
+    const float local_fwd =
+        vel_xz.x * player_fwd.x + vel_xz.z * player_fwd.z;
+    const float local_right =
+        vel_xz.x * player_right.x + vel_xz.z * player_right.z;
+
+    const bool use_forward_axis =
+        std::fabs(local_fwd) >= std::fabs(local_right);
 
     const char* direction =
-        std::fabs(local_fwd) >= std::fabs(local_right)
+        use_forward_axis
             ? (local_fwd >= 0.0f ? "Fwd" : "Bkw")
             : (local_right >= 0.0f ? "Right" : "Left");
 
-    const char* family =
-        animation_input >= std::max(g_player_control.move_run_threshold,
-                                    g_player_control.run_threshold)
-            ? "Run_"
-            : (animation_input >= g_player_control.move_walk_threshold
-                ? "Walk_"
-                : "Sneak_Walk_");
-
-    return find_anim((std::string(family) + direction).c_str());
-}
-
-static float sample_root_axis(const Animation* anim, float time, bool x_axis) {
-    if (!anim || anim->duration <= 0.0001f) return 0.0f;
-
-    for (const auto& track : anim->tracks) {
-        if (track.bone_id != 1000 ||
-            track.keyframes.empty() ||
-            (track.frame_type != 2 && track.frame_type != 3)) {
-            continue;
-        }
-
-        const AnimationKeyframe* k0 = &track.keyframes.front();
-        const AnimationKeyframe* k1 = k0;
-
-        if (time > track.keyframes.front().time) {
-            bool found = false;
-            for (size_t i = 0; i + 1 < track.keyframes.size(); ++i) {
-                const auto& a = track.keyframes[i];
-                const auto& b = track.keyframes[i + 1];
-                if (time >= a.time && time <= b.time) {
-                    k0 = &a;
-                    k1 = &b;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) k0 = k1 = &track.keyframes.back();
-        }
-
-        float t = 0.0f;
-        if (k1 != k0 && k1->time > k0->time) {
-            t = (time - k0->time) / (k1->time - k0->time);
-            t = std::max(0.0f, std::min(1.0f, t));
-        }
-
-        const float a = x_axis ? k0->tx : k0->tz;
-        const float b = x_axis ? k1->tx : k1->tz;
-        return a + t * (b - a);
-    }
-
-    return 0.0f;
-}
-
-static Vec3 locomotion_root_motion_delta(float animation_input, Vec3 vel_xz, float dt) {
-    const Animation* anim =
-        find_locomotion_animation(animation_input, vel_xz);
-
-    if (!anim || anim->duration <= 0.0001f || dt <= 0.0f) {
-        return {0.0f, 0.0f, 0.0f};
-    }
-
-    const bool loop = is_looping_locomotion_animation(anim);
-    const float start = (anim == g_current_anim) ? g_anim_time : 0.0f;
-    const float end = start + dt;
-
-    float t0 = start;
-    float t1 = end;
-    if (loop) {
-        t0 = fmodf(t0, anim->duration);
-        t1 = fmodf(t1, anim->duration);
-        if (t0 < 0.0f) t0 += anim->duration;
-        if (t1 < 0.0f) t1 += anim->duration;
+    const char* family = nullptr;
+    if (animation_input >=
+        std::max(g_player_control.move_run_threshold,
+                 g_player_control.run_threshold)) {
+        family = "Run_";
+    } else if (animation_input >= g_player_control.move_walk_threshold) {
+        family = "Walk_";
     } else {
-        t0 = std::min(t0, anim->duration);
-        t1 = std::min(t1, anim->duration);
+        family = "Sneak_Walk_";
     }
 
-    float dx = sample_root_axis(anim, t1, true) -
-               sample_root_axis(anim, t0, true);
-    float dz = sample_root_axis(anim, t1, false) -
-               sample_root_axis(anim, t0, false);
+    const std::string wanted =
+        std::string(family) + direction;
 
-    if (loop && end >= anim->duration) {
-        const float last_x = sample_root_axis(anim, anim->duration, true);
-        const float first_x = sample_root_axis(anim, 0.0f, true);
-        const float last_z = sample_root_axis(anim, anim->duration, false);
-        const float first_z = sample_root_axis(anim, 0.0f, false);
-        dx = (last_x - sample_root_axis(anim, t0, true)) +
-             (sample_root_axis(anim, t1, true) - first_x);
-        dz = (last_z - sample_root_axis(anim, t0, false)) +
-             (sample_root_axis(anim, t1, false) - first_z);
-    }
-
-    const float cy = cosf(g_player_yaw);
-    const float sy = sinf(g_player_yaw);
-    const Vec3 fwd = {-sy, 0.0f, -cy};
-    const Vec3 right = {cy, 0.0f, -sy};
-
-    return {
-        right.x * dx + fwd.x * (-dz),
-        0.0f,
-        right.z * dx + fwd.z * (-dz)
-    };
-}
-
-static float locomotion_root_motion_speed(float animation_input, Vec3 vel_xz) {
     return animation_root_motion_speed(
-        find_locomotion_animation(animation_input, vel_xz)
+        find_anim(wanted.c_str())
     );
 }
 
@@ -2879,30 +2798,23 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         vel_xz = {0.0f, 0.0f, 0.0f};
     }
 
-    // Usar el desplazamiento REAL del nodo raíz entre frames,
-    // no la velocidad media del ciclo.
-    Vec3 root_motion_delta =
-        locomotion_root_motion_delta(
+    // La animación elegida contiene el desplazamiento original del ciclo.
+    // Usarlo como velocidad mantiene sincronizados pasos y desplazamiento.
+    const float root_motion_speed =
+        locomotion_root_motion_speed(
             input_strength,
-            vel_xz,
-            dt
+            vel_xz
         );
 
-    float move_dx = root_motion_delta.x;
-    float move_dz = root_motion_delta.z;
+    const float movement_speed =
+        root_motion_speed > 0.0001f
+            ? root_motion_speed
+            : MOVE_SPEED_FALLBACK;
 
-    // Respaldo únicamente si una animación no aporta root-motion.
-    if (input_strength > 0.01f &&
-        std::fabs(move_dx) + std::fabs(move_dz) < 0.000001f) {
-        const float root_motion_speed =
-            locomotion_root_motion_speed(input_strength, vel_xz);
-        const float movement_speed =
-            root_motion_speed > 0.0001f
-                ? root_motion_speed
-                : MOVE_SPEED_FALLBACK;
-        move_dx = vel_xz.x * movement_speed * dt;
-        move_dz = vel_xz.z * movement_speed * dt;
-    }
+    const float move_dx =
+        vel_xz.x * movement_speed * dt;
+    const float move_dz =
+        vel_xz.z * movement_speed * dt;
 
     // Resolver el desplazamiento en pequeños pasos evita atravesar
     // superficies finas cuando un frame produce un movimiento grande.
