@@ -63,7 +63,7 @@ class MainActivity : Activity() {
                             rightPointerId = pId
                             rightLastX     = px
                             rightLastY     = py
-                            renderer.nativeLook(0f, 0f)
+                            renderer.nativeLook(0f, 0f, true)
                         }
                     }
 
@@ -98,7 +98,7 @@ class MainActivity : Activity() {
                                     val nx = (dx / TOUCH_AIM_DISTANCE).coerceIn(-1f, 1f)
                                     val ny = (dy / TOUCH_AIM_DISTANCE).coerceIn(-1f, 1f)
 
-                                    renderer.nativeLook(nx, ny)
+                                    renderer.nativeLook(nx, ny, true)
                                 }
                             }
                         }
