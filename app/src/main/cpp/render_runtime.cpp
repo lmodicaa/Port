@@ -19,6 +19,7 @@ out vec2  v_uv;
 out vec4  v_color;
 out float v_dist;
 out vec3  v_normal;
+out vec3  v_world_pos;
 
 void main() {
     vec4 local_pos = vec4(a_pos, 1.0);
