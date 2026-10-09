@@ -1,6 +1,7 @@
 #include "dff_loader.h"
 #include <string>
 #include <cmath>
+#include <cstring>
 #include <android/log.h>
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "ManhuntBSP", __VA_ARGS__)
@@ -17,35 +18,62 @@ public:
     const uint8_t* base;
     size_t pos;
     size_t max_size;
+    bool failed = false;
 
     BSPReader(const uint8_t* d, size_t s) : base(d), pos(0), max_size(s) {}
 
+    bool can_read(size_t bytes) const {
+        return base != nullptr && pos <= max_size && bytes <= max_size - pos;
+    }
+
     template<typename T>
     T read() {
-        if (pos + sizeof(T) > max_size) return T();
-        T val = *reinterpret_cast<const T*>(base + pos);
+        T val{};
+        if (!can_read(sizeof(T))) {
+            failed = true;
+            return val;
+        }
+        std::memcpy(&val, base + pos, sizeof(T));
         pos += sizeof(T);
         return val;
     }
 
     ChunkHeader read_chunk() {
-        ChunkHeader h;
+        if (!can_read(sizeof(ChunkHeader))) {
+            failed = true;
+            return ChunkHeader{};
+        }
+        ChunkHeader h{};
         h.type = read<uint32_t>();
         h.size = read<uint32_t>();
         h.version = read<uint32_t>();
         return h;
     }
 
-    void skip(size_t bytes) {
+    bool skip(size_t bytes) {
+        if (!can_read(bytes)) {
+            failed = true;
+            pos = max_size;
+            return false;
+        }
         pos += bytes;
+        return true;
     }
 };
 
 DFFModel bsp_load(const uint8_t* data, size_t size) {
     DFFModel model;
+    if (data == nullptr || size < sizeof(ChunkHeader)) {
+        LOGE("BSP: buffer nulo o demasiado pequeño (%zu bytes)", size);
+        return model;
+    }
     BSPReader r(data, size);
 
     ChunkHeader root = r.read_chunk();
+    if (r.failed || !r.can_read(root.size)) {
+        LOGE("BSP: cabecera raíz truncada o tamaño fuera del archivo");
+        return model;
+    }
     if (root.type != 0x000B) { // RW_WORLD
         LOGE("No es un archivo BSP/World (tipo=0x%04X)", root.type);
         return model;
@@ -55,6 +83,11 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
     
     // El primer hijo de RW_WORLD es RW_STRUCT
     ChunkHeader ws_hdr = r.read_chunk();
+    if (r.failed || !r.can_read(ws_hdr.size) ||
+        r.pos > root_end || ws_hdr.size > root_end - r.pos) {
+        LOGE("BSP: struct del mundo truncado");
+        return model;
+    }
     if (ws_hdr.type != 0x0001) return model;
 
     // ── Struct del mundo (84 bytes). Layout RW 3.6 (ver parse_bsp.py):
@@ -241,6 +274,10 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
         }
     }
 
+    if (r.failed) {
+        LOGE("BSP: lectura fuera de límites; se descarta el modelo");
+        return DFFModel{};
+    }
     model.valid = true;
     return model;
 }
