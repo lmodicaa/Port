@@ -3265,8 +3265,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
 
     GLint loc_has_tex = glGetUniformLocation(g_program, "u_has_tex");
     GLint loc_mat_color = glGetUniformLocation(g_program, "u_mat_color");
-    GLint loc_mat_ambient = glGetUniformLocation(g_program, "u_mat_ambient");
-    GLint loc_mat_diffuse = glGetUniformLocation(g_program, "u_mat_diffuse");
 
     glUniform1i(glGetUniformLocation(g_program, "u_lighting_debug_mode"), g_lighting_debug_mode.load(std::memory_order_relaxed));
 
@@ -3281,8 +3279,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
             glUniform1i(loc_has_tex, 0);
         }
         glUniform4fv(loc_mat_color, 1, group.material.color);
-        glUniform1f(loc_mat_ambient, group.material.ambient);
-        glUniform1f(loc_mat_diffuse, group.material.diffuse);
         
         if (group.material.color[3] < 0.99f) {
             glEnable(GL_BLEND);
@@ -3322,8 +3318,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                     glUniform1i(loc_has_tex, 0);
                 }
                 glUniform4fv(loc_mat_color, 1, group.material.color);
-                glUniform1f(loc_mat_ambient, group.material.ambient);
-                glUniform1f(loc_mat_diffuse, group.material.diffuse);
                 
                 if (group.material.color[3] < 0.99f) {
                     glEnable(GL_BLEND);
@@ -4260,8 +4254,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 glUniform1i(loc_has_tex, 0);
             }
             glUniform4fv(loc_mat_color, 1, group.material.color);
-            glUniform1f(loc_mat_ambient, group.material.ambient);
-            glUniform1f(loc_mat_diffuse, group.material.diffuse);
             
             if (group.material.color[3] < 0.99f) {
                 glEnable(GL_BLEND);
