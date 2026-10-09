@@ -56,6 +56,7 @@ uniform int u_has_tex;
 uniform vec4 u_world_ambient;
 uniform vec4 u_dir_ambient;
 uniform vec3 u_light_dir;
+uniform int u_lighting_debug_mode;
 
 uniform vec4 u_mat_color;
 uniform float u_mat_ambient;
@@ -74,18 +75,21 @@ void main() {
 
     if (base.a < 0.1) discard;
 
-    // La iluminación RGB del RW_WORLD todavía no está suficientemente
-    // verificada contra el pipeline exacto de Manhunt PC. Aplicarla aquí
-    // puede teñir toda la escena (por ejemplo, de azul) aunque las
-    // texturas y colores originales sean correctos.
-    //
-    // Conservamos el color de textura + vertex color + material y evitamos
-    // introducir una dominante cromática inventada mientras reconstruimos
-    // el pipeline de iluminación original.
-    //
-    // No usamos una niebla negra fija: 10..45 era un fallback inventado
-    // y cambiaba la imagen respecto del PC.
-    frag_color = base;
+    // Debug modes: 0=sin luz, 1=World combinado, 2=ambient solo,
+    // 3=dirAmbient solo. El modo 0 conserva exactamente el resultado previo.
+    vec3 lit_rgb = base.rgb;
+    if (u_lighting_debug_mode == 1) {
+        float ndotl = max(dot(normalize(v_normal), normalize(-u_light_dir)), 0.0);
+        vec3 world_light = u_world_ambient.rgb + u_dir_ambient.rgb * ndotl;
+        lit_rgb = base.rgb * world_light;
+    } else if (u_lighting_debug_mode == 2) {
+        lit_rgb = base.rgb * u_world_ambient.rgb;
+    } else if (u_lighting_debug_mode == 3) {
+        float ndotl = max(dot(normalize(v_normal), normalize(-u_light_dir)), 0.0);
+        lit_rgb = base.rgb * u_dir_ambient.rgb * ndotl;
+    }
+
+    frag_color = vec4(lit_rgb, base.a);
 })";
 
 
