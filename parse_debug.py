@@ -1,8 +1,10 @@
+import argparse
+from pathlib import Path
 import struct
 import sys
 
-def parse_bsp():
-    with open("app/src/main/assets/cash_pc.dff", "rb") as f:
+def parse_dff_frames(filepath):
+    with open(filepath, "rb") as f:
         data = f.read()
     
     pos = 0
@@ -31,4 +33,7 @@ def parse_bsp():
         else:
             pos += hdr[1]
 
-parse_bsp()
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Dump the first RenderWare DFF FrameList.')
+    parser.add_argument('filepath', type=Path, help='Path to a DFF file')
+    parse_dff_frames(parser.parse_args().filepath)
