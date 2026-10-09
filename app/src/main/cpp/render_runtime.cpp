@@ -40,6 +40,7 @@ void main() {
     v_color = a_color;
     v_dist = pos.w;
     v_normal = normalize(mat3(u_model) * local_normal);
+    v_world_pos = (u_model * local_pos).xyz;
 })";
 
 // Fragment: texturas + colores de vértices + niebla negra (Manhunt style)
@@ -49,6 +50,7 @@ in vec2  v_uv;
 in vec4  v_color;
 in float v_dist;
 in vec3  v_normal;
+in vec3  v_world_pos;
 
 uniform sampler2D u_tex;
 uniform int u_has_tex;
@@ -67,6 +69,8 @@ uniform float u_fog_end;
 uniform int u_fog_enabled;
 
 out vec4 frag_color;
+uniform vec3 u_cash_point_light_pos;
+uniform int u_cash_point_light_found;
 
 void main() {
     vec4 tex_color = vec4(1.0);
@@ -95,10 +99,18 @@ void main() {
         output_color = vec4(tex_color.rgb * boosted_prelit, tex_color.a * v_color.a);
     } else if (u_lighting_debug_mode == 4 && u_is_cash == 1) {
         vec3 n = normalize(v_normal);
-        vec3 light_dir = normalize(vec3(-0.35, 0.80, 0.48));
-        float ndotl = max(dot(n, light_dir), 0.0);
-        vec3 light = vec3(max(u_cash_ambient, 0.0)) +
-                     vec3(max(u_cash_directional, 0.0) * ndotl);
+        vec3 light = vec3(max(u_cash_ambient, 0.0));
+        if (u_cash_point_light_found == 1) {
+            vec3 to_light = u_cash_point_light_pos - v_world_pos;
+            float distance_to_light = length(to_light);
+            vec3 light_dir = distance_to_light > 0.0001
+                ? to_light / distance_to_light : vec3(0.0, 1.0, 0.0);
+            float ndotl = max(dot(n, light_dir), 0.0);
+            // Coeficientes de atenuación provisionales: modo experimental.
+            float attenuation = 1.0 / (1.0 + 0.09 * distance_to_light +
+                                        0.032 * distance_to_light * distance_to_light);
+            light += vec3(max(u_cash_directional, 0.0) * ndotl * attenuation);
+        }
         output_color = vec4(tex_color.rgb * u_mat_color.rgb * light,
                             tex_color.a * u_mat_color.a);
     } else {
