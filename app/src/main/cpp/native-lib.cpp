@@ -1211,9 +1211,28 @@ static std::map<std::string, std::map<std::string, std::string>> parse_ini_recor
 }
 
 static void load_asylum_environment() {
-    auto setup_bytes = read_asset("levels/asylum/levelSetup.ini");
-    if (setup_bytes.empty()) setup_bytes = read_asset("levels/asylum/LevelSetup.ini");
-    if (setup_bytes.empty()) setup_bytes = read_asset("levels/asylum/levelsetup.ini");
+    const std::vector<std::string> setup_paths = {
+        "export/ManHunt#pak/levels/Asylum/levelSetup.ini",
+        "export/ManHunt#pak/levels/asylum/levelSetup.ini",
+        "levels/Asylum/levelSetup.ini",
+        "levels/asylum/levelSetup.ini"
+    };
+    std::vector<uint8_t> setup_bytes;
+    std::string setup_path_used;
+    for (const auto& path : setup_paths) {
+        setup_bytes = read_asset(path.c_str());
+        if (!setup_bytes.empty()) {
+            setup_path_used = path;
+            break;
+        }
+    }
+    if (setup_path_used.empty()) {
+        std::string tried;
+        for (const auto& path : setup_paths) tried += (tried.empty() ? "" : ", ") + path;
+        LOGE("ENV ERROR: no se encontró levelSetup.ini. Rutas probadas: %s", tried.c_str());
+    } else {
+        LOGI("ENV: levelSetup.ini cargado desde '%s'", setup_path_used.c_str());
+    }
     const auto setup = parse_ini_records(setup_bytes);
     auto world = setup.find("WORLD1");
     if (world == setup.end()) {
@@ -1247,12 +1266,27 @@ static void load_asylum_environment() {
     // Weather records can vary by climate/state. Select a named record only
     // when world1 explicitly references one; otherwise use the first record
     // containing SKY and FOGSTART and log that this selection is unverified.
-    auto weather_bytes = read_asset("levels/asylum/WEATHER.INI");
-    if (weather_bytes.empty()) weather_bytes = read_asset("levels/asylum/weather.ini");
-    if (weather_bytes.empty()) weather_bytes = read_asset("levels/global/WEATHER.INI");
-    if (weather_bytes.empty()) weather_bytes = read_asset("levels/global/weather.ini");
-    if (weather_bytes.empty()) weather_bytes = read_asset("levels/WEATHER.INI");
-    if (weather_bytes.empty()) weather_bytes = read_asset("levels/weather.ini");
+    const std::vector<std::string> weather_paths = {
+        "export/ManHunt#pak/levels/global/WEATHER.INI",
+        "levels/global/WEATHER.INI",
+        "levels/GLOBAL/WEATHER.INI"
+    };
+    std::vector<uint8_t> weather_bytes;
+    std::string weather_path_used;
+    for (const auto& path : weather_paths) {
+        weather_bytes = read_asset(path.c_str());
+        if (!weather_bytes.empty()) {
+            weather_path_used = path;
+            break;
+        }
+    }
+    if (weather_path_used.empty()) {
+        std::string tried;
+        for (const auto& path : weather_paths) tried += (tried.empty() ? "" : ", ") + path;
+        LOGE("ENV ERROR: no se encontró WEATHER.INI global. Rutas probadas: %s", tried.c_str());
+    } else {
+        LOGI("ENV: WEATHER.INI global cargado desde '%s'", weather_path_used.c_str());
+    }
     std::vector<std::string> weather_order;
     const auto weather = parse_ini_records(weather_bytes, &weather_order);
     std::string wanted_weather;
