@@ -61,6 +61,10 @@ uniform float u_cash_ambient;
 uniform float u_cash_directional;
 
 uniform vec4 u_mat_color;
+uniform vec4 u_fog_color;
+uniform float u_fog_start;
+uniform float u_fog_end;
+uniform int u_fog_enabled;
 
 out vec4 frag_color;
 
@@ -101,6 +105,11 @@ void main() {
         output_color = tex_color;
     }
 
+    if (u_fog_enabled == 1) {
+        float fog_range = max(u_fog_end - u_fog_start, 0.001);
+        float fog_factor = clamp((v_dist - u_fog_start) / fog_range, 0.0, 1.0);
+        output_color.rgb = mix(output_color.rgb, u_fog_color.rgb, fog_factor);
+    }
     if (output_color.a < 0.1) discard;
     frag_color = output_color;
 })";
