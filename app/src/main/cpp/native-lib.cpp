@@ -3475,6 +3475,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     glUseProgram(g_program);
     glUniformMatrix4fv(glGetUniformLocation(g_program, "u_mvp"),   1, GL_FALSE, mvp.m);
     glUniformMatrix4fv(glGetUniformLocation(g_program, "u_model"), 1, GL_FALSE, model_m.m);
+    glUniformMatrix4fv(glGetUniformLocation(g_program, "u_view"), 1, GL_FALSE, view.m);
     glUniform1i(glGetUniformLocation(g_program, "u_skinned"), 0);
     glUniform1i(glGetUniformLocation(g_program, "u_tex"), 0);
 
