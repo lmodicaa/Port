@@ -649,7 +649,7 @@ std::map<std::string, DFFModel> dff_load_archive(const uint8_t* data, size_t siz
     std::map<std::string, DFFModel> archive;
     Reader r{data, size};
     
-    while (r.pos + sizeof(ChunkHeader) <= r.total) {
+    while (r.can_read(sizeof(ChunkHeader)) && !r.failed) {
         ChunkHeader hdr = r.read_chunk();
         if (r.failed || !r.can_read(hdr.size)) {
             LOGE("DFF archive: chunk truncado en offset %zu (tipo=0x%08X, size=%u)", r.pos, hdr.type, hdr.size);
@@ -661,14 +661,15 @@ std::map<std::string, DFFModel> dff_load_archive(const uint8_t* data, size_t siz
             // 1. Encontrar el Node Name dentro de este Clump
             std::string clump_name = "unknown";
             // Plugin ID: 0x0253F2FE (little endian: FE F2 53 02)
-            for (size_t i = 0; i < hdr.size - 4; ++i) {
-                if (data[r.pos + i] == 0xFE && 
-                    data[r.pos + i + 1] == 0xF2 && 
-                    data[r.pos + i + 2] == 0x53 && 
+            for (size_t i = 0; hdr.size >= 12 && i <= hdr.size - 12; ++i) {
+                if (data[r.pos + i] == 0xFE &&
+                    data[r.pos + i + 1] == 0xF2 &&
+                    data[r.pos + i + 2] == 0x53 &&
                     data[r.pos + i + 3] == 0x02) {
-                    
-                    uint32_t str_size = *(uint32_t*)(data + r.pos + i + 4);
-                    if (i + 12 + str_size <= hdr.size && str_size > 0 && str_size < 100) {
+
+                    uint32_t str_size = 0;
+                    std::memcpy(&str_size, data + r.pos + i + 4, sizeof(str_size));
+                    if (str_size > 0 && str_size < 100 && str_size <= hdr.size - (i + 12)) {
                         const char* str_ptr = (const char*)(data + r.pos + i + 12);
                         clump_name = std::string(str_ptr, str_size);
                         while(!clump_name.empty() && clump_name.back() == '\0') clump_name.pop_back();
