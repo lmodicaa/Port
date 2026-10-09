@@ -270,8 +270,6 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
                 bool has_colors  = bpv >= 20; // + colors
                 bool has_uv      = bpv >= 28; // + UVs
 
-                LOGI("ATOMICSECTOR: %u verts %u tris bpv=%zu nrm=%d col=%d uv=%d",
-                     numVert, numTri, bpv, has_normals, has_colors, has_uv);
 
                 // 1. Posiciones
                 for (uint32_t i = 0; i < numVert; i++) {
