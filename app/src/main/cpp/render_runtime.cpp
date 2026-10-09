@@ -73,7 +73,8 @@ void main() {
     // Diagnóstico de color; no es una reconstrucción de la iluminación original:
     // 0 = prelit, 1 = prelit * material, 2 = textura sola,
     // 3 = prelit boosted (multiplicador y gamma ajustables),
-    // 4 = luz experimental SOLO para Cash; el mundo conserva textura.
+    // 4 = luz experimental SOLO para Cash; el mundo conserva textura,
+    // 5 = textura * prelit (RenderWare por defecto), con multiplicador ajustable.
     vec4 output_color;
     if (u_lighting_debug_mode == 0) {
         output_color = v_color;
@@ -85,6 +86,9 @@ void main() {
         vec3 boosted = clamp(v_color.rgb * u_prelit_multiplier, 0.0, 1.0);
         float safe_gamma = max(u_prelit_gamma, 0.05);
         output_color = vec4(pow(boosted, vec3(1.0 / safe_gamma)), v_color.a);
+    } else if (u_lighting_debug_mode == 5) {
+        vec3 boosted_prelit = clamp(v_color.rgb * u_prelit_multiplier, 0.0, 1.0);
+        output_color = vec4(tex_color.rgb * boosted_prelit, tex_color.a * v_color.a);
     } else if (u_lighting_debug_mode == 4 && u_is_cash == 1) {
         vec3 n = normalize(v_normal);
         vec3 light_dir = normalize(vec3(-0.35, 0.80, 0.48));
