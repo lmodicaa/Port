@@ -22,30 +22,58 @@ struct Reader {
     const uint8_t* base;
     size_t         total;
     size_t         pos = 0;
+    bool           failed = false;
 
-    bool can_read(size_t n) const { return pos + n <= total; }
+    bool can_read(size_t n) const {
+        return base != nullptr && pos <= total && n <= total - pos;
+    }
 
     template<typename T>
     T read() {
         T v{};
-        if (can_read(sizeof(T))) {
-            memcpy(&v, base + pos, sizeof(T));
-            pos += sizeof(T);
+        if (!can_read(sizeof(T))) {
+            failed = true;
+            return v;
         }
+        memcpy(&v, base + pos, sizeof(T));
+        pos += sizeof(T);
         return v;
     }
 
-    void skip(size_t n) { pos += n; }
-    ChunkHeader read_chunk() { return read<ChunkHeader>(); }
+    bool skip(size_t n) {
+        if (!can_read(n)) {
+            failed = true;
+            pos = total;
+            return false;
+        }
+        pos += n;
+        return true;
+    }
+
+    ChunkHeader read_chunk() {
+        if (!can_read(sizeof(ChunkHeader))) {
+            failed = true;
+            return ChunkHeader{};
+        }
+        return read<ChunkHeader>();
+    }
 };
 
 DFFModel dff_load(const uint8_t* data, size_t size) {
-    Reader r{data, size};
     DFFModel model;
+    if (data == nullptr || size < sizeof(ChunkHeader)) {
+        LOGE("DFF: buffer nulo o demasiado pequeño (%zu bytes)", size);
+        return model;
+    }
+    Reader r{data, size};
     
     // Escaneamos recursivamente buscando GEOMETRY chunks (0x0F)
-    while (r.pos + sizeof(ChunkHeader) <= r.total) {
+    while (r.can_read(sizeof(ChunkHeader)) && !r.failed) {
         ChunkHeader hdr = r.read_chunk();
+        if (r.failed || !r.can_read(hdr.size)) {
+            LOGE("DFF: chunk truncado en offset %zu (tipo=0x%08X, size=%u)", r.pos, hdr.type, hdr.size);
+            return DFFModel{};
+        }
         
         // Si es un contenedor, leemos sus hijos (no skipeamos su payload)
         if (hdr.type == RW_CLUMP || hdr.type == RW_GEOMETRYLIST) {
@@ -86,7 +114,7 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                 ChunkHeader ext = r.read_chunk();
                 size_t ext_end = r.pos + ext.size;
 
-                while (r.pos + sizeof(ChunkHeader) <= ext_end) {
+                while (r.pos <= ext_end && sizeof(ChunkHeader) <= ext_end - r.pos && r.can_read(sizeof(ChunkHeader)) && !r.failed) {
                     ChunkHeader plug = r.read_chunk();
                     size_t plug_payload_start = r.pos;
                     size_t plug_payload_end =
@@ -407,7 +435,7 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
         }
 
         // Buscar Plugin de Skin dentro de las extensiones del Geometry
-        while (r.pos + sizeof(ChunkHeader) <= geom_end) {
+        while (r.pos <= geom_end && sizeof(ChunkHeader) <= geom_end - r.pos && r.can_read(sizeof(ChunkHeader)) && !r.failed) {
             ChunkHeader ch = r.read_chunk();
             if (ch.type == 0x0003) { // Extension
                 size_t ext_end = r.pos + ch.size;
@@ -506,6 +534,10 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
             }
         }
 
+        if (r.failed) {
+            LOGE("DFF: lectura fuera de límites; se descarta la geometría");
+            return DFFModel{};
+        }
         model.valid = true;
         r.pos = geom_end; // Avanzar al final del bloque Geometry completo
     }
@@ -558,6 +590,10 @@ std::map<std::string, DFFModel> dff_load_archive(const uint8_t* data, size_t siz
     
     while (r.pos + sizeof(ChunkHeader) <= r.total) {
         ChunkHeader hdr = r.read_chunk();
+        if (r.failed || !r.can_read(hdr.size)) {
+            LOGE("DFF archive: chunk truncado en offset %zu (tipo=0x%08X, size=%u)", r.pos, hdr.type, hdr.size);
+            return {};
+        }
         if (hdr.type == RW_CLUMP) {
             size_t clump_end = r.pos + hdr.size;
             
