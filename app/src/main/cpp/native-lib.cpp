@@ -1211,7 +1211,10 @@ static std::map<std::string, std::map<std::string, std::string>> parse_ini_recor
 }
 
 static void load_asylum_environment() {
-    const auto setup = parse_ini_records(read_asset("levels/asylum/levelSetup.ini"));
+    auto setup_bytes = read_asset("levels/asylum/levelSetup.ini");
+    if (setup_bytes.empty()) setup_bytes = read_asset("levels/asylum/LevelSetup.ini");
+    if (setup_bytes.empty()) setup_bytes = read_asset("levels/asylum/levelsetup.ini");
+    const auto setup = parse_ini_records(setup_bytes);
     auto world = setup.find("WORLD1");
     if (world == setup.end()) {
         LOGE("ENV: levelSetup.ini no contiene RECORD world1; se conservan valores de respaldo");
@@ -1246,6 +1249,10 @@ static void load_asylum_environment() {
     // containing SKY and FOGSTART and log that this selection is unverified.
     auto weather_bytes = read_asset("levels/asylum/WEATHER.INI");
     if (weather_bytes.empty()) weather_bytes = read_asset("levels/asylum/weather.ini");
+    if (weather_bytes.empty()) weather_bytes = read_asset("levels/global/WEATHER.INI");
+    if (weather_bytes.empty()) weather_bytes = read_asset("levels/global/weather.ini");
+    if (weather_bytes.empty()) weather_bytes = read_asset("levels/WEATHER.INI");
+    if (weather_bytes.empty()) weather_bytes = read_asset("levels/weather.ini");
     std::vector<std::string> weather_order;
     const auto weather = parse_ini_records(weather_bytes, &weather_order);
     std::string wanted_weather;
