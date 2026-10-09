@@ -12,6 +12,7 @@ layout(location=5) in vec4 a_bone_weight;
 
 uniform mat4 u_mvp;
 uniform mat4 u_model;
+uniform mat4 u_view;
 uniform mat4 u_bone_matrices[96];
 uniform int u_skinned;
 
@@ -39,7 +40,7 @@ void main() {
     gl_Position = pos;
     v_uv = a_uv;
     v_color = a_color;
-    v_dist = pos.w;
+    v_dist = -(u_view * u_model * local_pos).z;
     v_normal = normalize(mat3(u_model) * local_normal);
     v_world_pos = (u_model * local_pos).xyz;
 })";
