@@ -530,6 +530,7 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                                 std::string tex_name(reinterpret_cast<const char*>(r.base + r.pos), str_h.size);
                                 while(!tex_name.empty() && tex_name.back() == '\0') tex_name.pop_back();
                                 model.material_textures[i] = tex_name;
+                        model.materials[i].texture = tex_name;
                                 LOGI("Material %d usa textura: '%s'", i, tex_name.c_str());
                             }
                             r.pos = tex_end;
