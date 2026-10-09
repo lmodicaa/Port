@@ -54,6 +54,11 @@ uniform sampler2D u_tex;
 uniform int u_has_tex;
 
 uniform int u_lighting_debug_mode;
+uniform int u_is_cash;
+uniform float u_prelit_multiplier;
+uniform float u_prelit_gamma;
+uniform float u_cash_ambient;
+uniform float u_cash_directional;
 
 uniform vec4 u_mat_color;
 
@@ -65,15 +70,29 @@ void main() {
         tex_color = texture(u_tex, v_uv);
     }
 
-    // Modos de diagnóstico sin luz de mundo ficticia:
-    // 0 = prelit (color de vértice)
-    // 1 = prelit * color del material
-    // 2 = textura sola (blanco si el grupo no tiene textura)
+    // Diagnóstico de color; no es una reconstrucción de la iluminación original:
+    // 0 = prelit, 1 = prelit * material, 2 = textura sola,
+    // 3 = prelit boosted (multiplicador y gamma ajustables),
+    // 4 = luz experimental SOLO para Cash; el mundo conserva textura.
     vec4 output_color;
     if (u_lighting_debug_mode == 0) {
         output_color = v_color;
     } else if (u_lighting_debug_mode == 1) {
         output_color = v_color * u_mat_color;
+    } else if (u_lighting_debug_mode == 2) {
+        output_color = tex_color;
+    } else if (u_lighting_debug_mode == 3) {
+        vec3 boosted = clamp(v_color.rgb * u_prelit_multiplier, 0.0, 1.0);
+        float safe_gamma = max(u_prelit_gamma, 0.05);
+        output_color = vec4(pow(boosted, vec3(1.0 / safe_gamma)), v_color.a);
+    } else if (u_lighting_debug_mode == 4 && u_is_cash == 1) {
+        vec3 n = normalize(v_normal);
+        vec3 light_dir = normalize(vec3(-0.35, 0.80, 0.48));
+        float ndotl = max(dot(n, light_dir), 0.0);
+        vec3 light = vec3(max(u_cash_ambient, 0.0)) +
+                     vec3(max(u_cash_directional, 0.0) * ndotl);
+        output_color = vec4(tex_color.rgb * u_mat_color.rgb * light,
+                            tex_color.a * u_mat_color.a);
     } else {
         output_color = tex_color;
     }
