@@ -3,7 +3,11 @@
 #include <android/log.h>
 
 #define TAG "Manhunt/DFF"
+#if defined(MANHUNT_VERBOSE_ASSET_LOGS)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
+#else
+#define LOGI(...) do { } while (0)
+#endif
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 static constexpr uint32_t RW_STRUCT        = 0x0001;
