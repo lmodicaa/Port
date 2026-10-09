@@ -148,7 +148,7 @@ class MainActivity : Activity() {
             "Debug: prelit × material",
             "Debug: textura sola",
             "Debug: prelit boosted",
-            "EXPERIMENTAL: luz Cash",
+            "EXPERIMENTAL: luz puntual Cash",
             "Debug: textura × prelit"
         )
         var lightingMode = 0
