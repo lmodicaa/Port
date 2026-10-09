@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <string>
 
 bool sample_animation_bone(
@@ -215,7 +216,9 @@ bool is_looping_locomotion_animation(const Animation* anim) {
 
 const char* locomotion_direction_from_animation(const Animation* anim) {
     if (!anim) return "Fwd";
-    const std::string n = to_lower(anim->name);
+    std::string n = anim->name;
+    std::transform(n.begin(), n.end(), n.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (n.find("_bkw") != std::string::npos) return "Bkw";
     if (n.find("_left") != std::string::npos) return "Left";
     if (n.find("_right") != std::string::npos) return "Right";
