@@ -10,6 +10,7 @@ add_library(manhunt SHARED
         collision_runtime.cpp
         level_runtime.cpp
         render_runtime.cpp
+        player_runtime.cpp
         txd_loader.cpp
         dff_loader.cpp
         bsp_loader.cpp
