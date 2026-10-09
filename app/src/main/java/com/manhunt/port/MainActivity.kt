@@ -201,6 +201,14 @@ class MainActivity : Activity() {
             row.addView(caption, LinearLayout.LayoutParams(
                 0, (36 * density).toInt(), 1f
             ))
+            val value = TextView(this).apply {
+                text = "%.2f".format(java.util.Locale.US,
+                    renderer.nativeGetRenderDebugValue(setting))
+                setTextColor(Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                gravity = Gravity.CENTER
+                maxLines = 1
+            }
             fun stepButton(symbol: String, direction: Int) = Button(this).apply {
                 text = symbol
                 isAllCaps = false
@@ -219,14 +227,6 @@ class MainActivity : Activity() {
             row.addView(minus, LinearLayout.LayoutParams(
                 (36 * density).toInt(), (34 * density).toInt()
             ))
-            val value = TextView(this).apply {
-                text = "%.2f".format(java.util.Locale.US,
-                    renderer.nativeGetRenderDebugValue(setting))
-                setTextColor(Color.WHITE)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-                gravity = Gravity.CENTER
-                maxLines = 1
-            }
             row.addView(value, LinearLayout.LayoutParams(
                 (48 * density).toInt(), (34 * density).toInt()
             ))
