@@ -83,7 +83,7 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
     
     // El primer hijo de RW_WORLD es RW_STRUCT
     ChunkHeader ws_hdr = r.read_chunk();
-    if (r.failed || !r.can_read(ws_hdr.size) ||
+    if (r.failed || ws_hdr.size < 60 || !r.can_read(ws_hdr.size) ||
         r.pos > root_end || ws_hdr.size > root_end - r.pos) {
         LOGE("BSP: struct del mundo truncado");
         return model;
@@ -206,6 +206,11 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
         if (ch.type == 0x0009) { // ATOMICSECTOR
             size_t atom_end = r.pos + ch.size;
             ChunkHeader st = r.read_chunk();
+            if (r.failed || r.pos > atom_end || st.size > atom_end - r.pos ||
+                !r.can_read(st.size)) {
+                LOGE("BSP: struct de atomic/sector truncado");
+                return DFFModel{};
+            }
             uint32_t matListBase = r.read<uint32_t>();
             uint32_t numTri      = r.read<uint32_t>();
             uint32_t numVert     = r.read<uint32_t>();
@@ -293,6 +298,11 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
         else if (ch.type == 0x000A) { // PLANESECTOR
             // PLANESECTOR wraps children — skip its own Struct, then fall into children
             ChunkHeader st = r.read_chunk();
+            if (r.failed || r.pos > root_end || st.size > root_end - r.pos ||
+                !r.can_read(st.size)) {
+                LOGE("BSP: struct de planesector truncado");
+                return DFFModel{};
+            }
             r.skip(st.size);
         }
         else {
