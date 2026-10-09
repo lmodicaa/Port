@@ -27,30 +27,58 @@ struct Reader {
     const uint8_t* base;
     size_t         total;
     size_t         pos = 0;
+    bool           failed = false;
 
-    bool ok()                  const { return pos <= total; }
-    bool can_read(size_t n)    const { return pos + n <= total; }
+    bool ok() const { return pos <= total; }
+    bool can_read(size_t n) const {
+        return base != nullptr && pos <= total && n <= total - pos;
+    }
 
     template<typename T>
     T read() {
         T v{};
-        if (can_read(sizeof(T))) {
-            memcpy(&v, base + pos, sizeof(T));
-            pos += sizeof(T);
+        if (!can_read(sizeof(T))) {
+            failed = true;
+            return v;
         }
+        memcpy(&v, base + pos, sizeof(T));
+        pos += sizeof(T);
         return v;
     }
 
-    void skip(size_t n) { pos += n; }
+    bool skip(size_t n) {
+        if (!can_read(n)) {
+            failed = true;
+            pos = total;
+            return false;
+        }
+        pos += n;
+        return true;
+    }
 
-    ChunkHeader read_chunk() { return read<ChunkHeader>(); }
+    ChunkHeader read_chunk() {
+        if (!can_read(sizeof(ChunkHeader))) {
+            failed = true;
+            return ChunkHeader{};
+        }
+        return read<ChunkHeader>();
+    }
 
-    // Avanza hasta el siguiente chunk del tipo buscado dentro de [end]
+    // Avanza hasta el siguiente chunk del tipo buscado dentro de [end].
     bool find_chunk(uint32_t type, size_t end, ChunkHeader& out) {
-        while (pos + sizeof(ChunkHeader) <= end) {
+        if (end > total || pos > end) {
+            failed = true;
+            return false;
+        }
+        while (pos <= end && sizeof(ChunkHeader) <= end - pos) {
             out = read_chunk();
+            if (failed) return false;
+            if (out.size > end - pos || !can_read(out.size)) {
+                failed = true;
+                return false;
+            }
             if (out.type == type) return true;
-            skip(out.size);           // saltar chunk que no nos interesa
+            if (!skip(out.size)) return false;
         }
         return false;
     }
@@ -299,6 +327,10 @@ std::vector<TXDTexture> txd_load_all(const uint8_t* data, size_t size) {
 
     // Chunk raíz: TexDictionary
     ChunkHeader root = r.read_chunk();
+    if (r.failed || !r.can_read(root.size)) {
+        LOGE("TXD: cabecera raíz truncada o tamaño fuera del archivo");
+        return {};
+    }
     if (root.type != RW_TEX_DICTIONARY) {
         LOGE("No es un TXD (type=0x%X)", root.type);
         return result;
@@ -307,6 +339,10 @@ std::vector<TXDTexture> txd_load_all(const uint8_t* data, size_t size) {
 
     // Struct del TexDictionary: número de texturas
     ChunkHeader sh = r.read_chunk();
+    if (r.failed || !r.can_read(sh.size) || r.pos > txd_end || sh.size > txd_end - r.pos) {
+        LOGE("TXD: struct del diccionario truncado");
+        return {};
+    }
     if (sh.type != RW_STRUCT) { LOGE("TXD: falta struct"); return result; }
     uint16_t tex_count = r.read<uint16_t>();
     uint16_t device_id = r.read<uint16_t>();
@@ -320,6 +356,10 @@ std::vector<TXDTexture> txd_load_all(const uint8_t* data, size_t size) {
         size_t tn_end = r.pos + tn.size;
         
         TXDTexture tex = parse_texture_native(r, tn_end);
+        if (r.failed || r.pos > tn_end) {
+            LOGE("TXD: textura nativa truncada; se descarta el diccionario");
+            return {};
+        }
         if (tex.valid) {
             result.push_back(tex);
         }
