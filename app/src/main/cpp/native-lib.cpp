@@ -4118,11 +4118,13 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
                 skin_bone <
                 g_cash_model.skin_bone_to_frame.size()) {
 
+                // skin_bone es el índice de la paleta Skin; la pose
+                // animada está indexada por el frame HAnim real.
                 hierarchy_relative =
                     mat4_mul(
                         atomic_inverse,
                         hanim_global_bones[
-                            skin_bone
+                            frame_index
                         ]
                     );
             } else {
