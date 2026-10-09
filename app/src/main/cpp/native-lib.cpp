@@ -47,6 +47,11 @@ static AAssetManager* g_assets   = nullptr;
 static std::string    g_base_path = "";
 static GLuint g_program           = 0;
 static std::atomic<int> g_lighting_debug_mode{0};
+// Parámetros de diagnóstico; no representan valores medidos del juego original.
+static float g_prelit_multiplier = 2.0f;
+static float g_prelit_gamma = 1.0f;
+static float g_cash_ambient = 0.35f;
+static float g_cash_directional = 0.75f;
 static GLuint g_vao               = 0;
 static std::map<std::string, GLuint> g_tex_map;
 static std::map<std::string, Animation> g_anims;
@@ -3265,8 +3270,18 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
 
     GLint loc_has_tex = glGetUniformLocation(g_program, "u_has_tex");
     GLint loc_mat_color = glGetUniformLocation(g_program, "u_mat_color");
+    GLint loc_is_cash = glGetUniformLocation(g_program, "u_is_cash");
+    GLint loc_prelit_multiplier = glGetUniformLocation(g_program, "u_prelit_multiplier");
+    GLint loc_prelit_gamma = glGetUniformLocation(g_program, "u_prelit_gamma");
+    GLint loc_cash_ambient = glGetUniformLocation(g_program, "u_cash_ambient");
+    GLint loc_cash_directional = glGetUniformLocation(g_program, "u_cash_directional");
 
     glUniform1i(glGetUniformLocation(g_program, "u_lighting_debug_mode"), g_lighting_debug_mode.load(std::memory_order_relaxed));
+    glUniform1f(loc_prelit_multiplier, g_prelit_multiplier);
+    glUniform1f(loc_prelit_gamma, g_prelit_gamma);
+    glUniform1f(loc_cash_ambient, g_cash_ambient);
+    glUniform1f(loc_cash_directional, g_cash_directional);
+    glUniform1i(loc_is_cash, 0);
 
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(g_vao);
@@ -4243,6 +4258,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
         glBindVertexArray(
             it_cash->second.vao
         );
+        glUniform1i(loc_is_cash, 1);
         for (const auto& group : it_cash->second.groups) {
             if (group.texture_id) {
                 glUniform1i(loc_has_tex, 1);
@@ -4436,8 +4452,40 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
 // Ciclo: automático -> bind pose -> animación 0 -> ... -> bind pose.
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeSetLightingDebugMode(JNIEnv*, jobject, jint mode) {
-    g_lighting_debug_mode.store(std::max(0, std::min(2, static_cast<int>(mode))), std::memory_order_relaxed);
-    LOGI("LIGHTING DEBUG MODE: %d", g_lighting_debug_mode.load(std::memory_order_relaxed));
+    const int selected = std::max(0, std::min(4, static_cast<int>(mode)));
+    g_lighting_debug_mode.store(selected, std::memory_order_relaxed);
+    static const char* names[] = {
+        "prelit", "prelit_material", "texture_only", "prelit_boosted",
+        "EXPERIMENTAL_cash_ambient_directional"
+    };
+    LOGI("RENDER DEBUG MODE: %s (%d); prelit_multiplier=%.2f gamma=%.2f cash_ambient=%.2f cash_directional=%.2f",
+         names[selected], selected, g_prelit_multiplier, g_prelit_gamma,
+         g_cash_ambient, g_cash_directional);
+}
+
+JNIEXPORT void JNICALL
+Java_com_manhunt_port_ManhuntRenderer_nativeAdjustRenderDebug(JNIEnv*, jobject, jint setting, jint direction) {
+    const float step = direction >= 0 ? 0.10f : -0.10f;
+    switch (setting) {
+        case 0: // prelit multiplier
+            g_prelit_multiplier = std::max(0.10f, std::min(8.0f, g_prelit_multiplier + step));
+            break;
+        case 1: // gamma
+            g_prelit_gamma = std::max(0.20f, std::min(3.0f, g_prelit_gamma + step));
+            break;
+        case 2: // Cash ambient
+            g_cash_ambient = std::max(0.0f, std::min(3.0f, g_cash_ambient + step));
+            break;
+        case 3: // Cash directional intensity
+            g_cash_directional = std::max(0.0f, std::min(3.0f, g_cash_directional + step));
+            break;
+        default:
+            return;
+    }
+    LOGI("RENDER DEBUG VALUES: prelit_multiplier=%.2f gamma=%.2f cash_ambient=%.2f cash_directional=%.2f mode=%d%s",
+         g_prelit_multiplier, g_prelit_gamma, g_cash_ambient, g_cash_directional,
+         g_lighting_debug_mode.load(std::memory_order_relaxed),
+         g_lighting_debug_mode.load(std::memory_order_relaxed) == 4 ? " (EXPERIMENTAL CASH LIGHT)" : "");
 }
 
 JNIEXPORT void JNICALL
