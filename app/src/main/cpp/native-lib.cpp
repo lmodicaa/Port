@@ -42,7 +42,6 @@ struct RenderGroup {
     GLuint texture_id;
     MaterialData material;
 };
-static WorldLighting g_world_lighting;
 
 static AAssetManager* g_assets   = nullptr;
 static std::string    g_base_path = "";
@@ -2087,7 +2086,6 @@ static void setup_model() {
         return;
     }
 
-    g_world_lighting = model.world;
 
     // Construir triángulos de colisión desde todos los vértices del modelo
     g_col_grid.cells.clear();
@@ -3270,9 +3268,6 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     GLint loc_mat_ambient = glGetUniformLocation(g_program, "u_mat_ambient");
     GLint loc_mat_diffuse = glGetUniformLocation(g_program, "u_mat_diffuse");
 
-    glUniform4fv(glGetUniformLocation(g_program, "u_world_ambient"), 1, g_world_lighting.ambient);
-    glUniform4fv(glGetUniformLocation(g_program, "u_dir_ambient"), 1, g_world_lighting.dir_ambient);
-    glUniform3fv(glGetUniformLocation(g_program, "u_light_dir"), 1, g_world_lighting.light_dir);
     glUniform1i(glGetUniformLocation(g_program, "u_lighting_debug_mode"), g_lighting_debug_mode.load(std::memory_order_relaxed));
 
     glActiveTexture(GL_TEXTURE0);
@@ -4449,7 +4444,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
 // Ciclo: automático -> bind pose -> animación 0 -> ... -> bind pose.
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeSetLightingDebugMode(JNIEnv*, jobject, jint mode) {
-    g_lighting_debug_mode.store(std::max(0, std::min(3, static_cast<int>(mode))), std::memory_order_relaxed);
+    g_lighting_debug_mode.store(std::max(0, std::min(2, static_cast<int>(mode))), std::memory_order_relaxed);
     LOGI("LIGHTING DEBUG MODE: %d", g_lighting_debug_mode.load(std::memory_order_relaxed));
 }
 
