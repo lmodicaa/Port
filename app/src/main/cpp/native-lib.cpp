@@ -414,6 +414,8 @@ static std::vector<ColModel> g_col_models;
 static std::map<std::string, size_t> g_col_model_by_name;
 static std::vector<std::pair<Vec3, float>> g_col_spheres_world;
 static std::vector<EntityInst> g_insts;
+static Vec3 g_cash_point_light_pos = {0.0f, 0.0f, 0.0f};
+static bool g_cash_point_light_found = false;
 
 // entityTypeData.ini: RECORD -> COLLISION_DATA.
 // Manhunt uses this indirection instead of requiring the collision
@@ -2442,6 +2444,23 @@ static void setup_model() {
             g_insts.insert(g_insts.end(), inst2.begin(), inst2.end());
             LOGI("Instancias totales: %zu", g_insts.size());
         }
+    }
+
+    g_cash_point_light_found = false;
+    for (const auto& inst : g_insts) {
+        const std::string identity = to_lower(inst.name + " " + inst.model + " " + inst.entity_class);
+        if (identity.find("dynamic_light1_(l)") != std::string::npos ||
+            identity.find("dynamic_light1_l") != std::string::npos) {
+            g_cash_point_light_pos = {inst.pos[0], inst.pos[1], inst.pos[2]};
+            g_cash_point_light_found = true;
+            LOGI("EXPERIMENTAL CASH POINT LIGHT: source='%s' model='%s' pos=(%.3f,%.3f,%.3f)",
+                 inst.name.c_str(), inst.model.c_str(),
+                 g_cash_point_light_pos.x, g_cash_point_light_pos.y, g_cash_point_light_pos.z);
+            break;
+        }
+    }
+    if (!g_cash_point_light_found) {
+        LOGE("EXPERIMENTAL CASH POINT LIGHT: Dynamic_light1_(L) not found in loaded INST; point diffuse disabled");
     }
 
     auto col_raw = read_asset("levels/asylum/collisions.col");
