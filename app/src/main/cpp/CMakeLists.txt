@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 add_library(manhunt SHARED
         native-lib.cpp
         math3d.cpp
+        animation_runtime.cpp
         txd_loader.cpp
         dff_loader.cpp
         bsp_loader.cpp
