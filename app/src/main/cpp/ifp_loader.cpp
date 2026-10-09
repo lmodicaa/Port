@@ -10,7 +10,11 @@
 
 #define LOG_TAG "Port-IFP"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#if defined(MANHUNT_VERBOSE_ASSET_LOGS)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#else
+#define LOGI(...) do { } while (0)
+#endif
 
 class Reader2 {
 public:
@@ -445,7 +449,6 @@ std::map<std::string, Animation> load_ifp(
         return animations;
     }
 
-    FILE* playerAnimDump = nullptr;
 
     try {
 
@@ -518,25 +521,6 @@ std::map<std::string, Animation> load_ifp(
                 blockName.c_str(),
                 animationCount
             );
-
-            if (blockName == "PlayerAnims") {
-                playerAnimDump = std::fopen(
-                    "/storage/emulated/0/Manhunt/PlayerAnims.txt",
-                    "w"
-                );
-
-                if (playerAnimDump) {
-                    std::fprintf(
-                        playerAnimDump,
-                        "PlayerAnims: %u animaciones\\n\\n",
-                        animationCount
-                    );
-                    std::fflush(playerAnimDump);
-                    LOGI("PLAYER_ANIMS_DUMP: abierto /storage/emulated/0/Manhunt/PlayerAnims.txt");
-                } else {
-                    LOGE("PLAYER_ANIMS_DUMP: no se pudo abrir el archivo");
-                }
-            }
 
             /*
              * ------------------------------------------------
@@ -625,16 +609,7 @@ std::map<std::string, Animation> load_ifp(
                         animation.name.c_str()
                     );
 
-                    if (playerAnimDump) {
-                        std::fprintf(
-                            playerAnimDump,
-                            "%u/%u: %s\\n",
-                            animationIndex + 1,
-                            animationCount,
-                            animation.name.c_str()
-                        );
-                        std::fflush(playerAnimDump);
-                    }
+
                 }
 
                 /*
@@ -787,11 +762,6 @@ std::map<std::string, Animation> load_ifp(
                     std::move(animation);
             }
 
-            if (blockName == "PlayerAnims" && playerAnimDump) {
-                std::fclose(playerAnimDump);
-                playerAnimDump = nullptr;
-                LOGI("PLAYER_ANIMS_DUMP: terminado (%u nombres)", animationCount);
-            }
         }
 
         /*
@@ -800,24 +770,14 @@ std::map<std::string, Animation> load_ifp(
          * ----------------------------------------------------
          */
 
-        LOGI(
-            "IFP cargado correctamente: %zu animaciones",
-            animations.size()
+        __android_log_print(
+            ANDROID_LOG_INFO, LOG_TAG,
+            "IFP cargado: %zu animaciones", animations.size()
         );
 
-        LOGI(
-            "Final offset: %zu / %zu",
-            reader.pos(),
-            size
-        );
 
     }
     catch (const std::exception& e) {
-
-        if (playerAnimDump) {
-            std::fclose(playerAnimDump);
-            playerAnimDump = nullptr;
-        }
 
         LOGE(
             "ERROR parseando IFP: %s",
