@@ -1161,7 +1161,7 @@ static std::vector<float> parse_ini_numbers(const std::string& value) {
         if (token.empty()) continue;
         char* end = nullptr;
         const float parsed = std::strtof(token.c_str(), &end);
-        if (end != token.c_str() && (*end == '\\0' || (*end == 'f' && end[1] == '\\0'))) {
+        if (end != token.c_str() && (*end == '\0' || (*end == 'f' && end[1] == '\0'))) {
             result.push_back(parsed);
         }
     }
