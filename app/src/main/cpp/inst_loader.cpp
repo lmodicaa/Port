@@ -7,21 +7,33 @@
 
 std::vector<EntityInst> parse_inst(const std::vector<uint8_t>& data) {
     std::vector<EntityInst> insts;
-    if (data.size() < 4) return insts;
-    
+    if (data.size() < sizeof(uint32_t)) {
+        LOGE("INST: cabecera truncada (%zu bytes)", data.size());
+        return insts;
+    }
+
     uint32_t count = 0;
-    memcpy(&count, data.data(), 4);
-    
-    if (data.size() < 4 + count * 4) return insts;
+    memcpy(&count, data.data(), sizeof(count));
+
+    // Divide instead of multiplying count*4 to avoid integer overflow.
+    if (count > (data.size() - sizeof(uint32_t)) / sizeof(uint32_t)) {
+        LOGE("INST: directorio de tamaños truncado (count=%u, bytes=%zu)",
+             count, data.size());
+        return insts;
+    }
     
     std::vector<uint32_t> sizes(count);
     memcpy(sizes.data(), data.data() + 4, count * 4);
     
-    uint32_t offset = 4 + count * 4;
-    
+    size_t offset = sizeof(uint32_t) + static_cast<size_t>(count) * sizeof(uint32_t);
+
     for (uint32_t i = 0; i < count; i++) {
-        uint32_t size = sizes[i];
-        if (offset + size > data.size()) break;
+        const size_t size = sizes[i];
+        if (offset > data.size() || size > data.size() - offset) {
+            LOGE("INST: registro %u truncado (offset=%zu, size=%zu, total=%zu)",
+                 i, offset, size, data.size());
+            break;
+        }
         
         const uint8_t* block = data.data() + offset;
         EntityInst ent;
