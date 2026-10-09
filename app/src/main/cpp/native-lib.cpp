@@ -1253,6 +1253,7 @@ static void load_asylum_environment() {
     }
     auto selected = weather.end();
     if (!wanted_weather.empty()) selected = weather.find(wanted_weather);
+    const bool weather_ref_resolved = selected != weather.end();
     if (selected == weather.end()) {
         for (const auto& name : weather_order) {
             const auto it = weather.find(name);
@@ -1300,9 +1301,11 @@ static void load_asylum_environment() {
         if (!fog_start_value.empty()) {
             const auto values = parse_ini_numbers(fog_start_value);
             if (!values.empty() && values[0] >= 0.0f) g_fog_start = values[0];
+        } else {
+            fog_start_record = "fallback_default_30.0";
         }
         LOGI("ENV weather: record='%s' selection=%s SKY=(%.2f,%.2f,%.2f)/255 FOGSTART=%.3f source_record='%s'",
-             selected->first.c_str(), wanted_weather.empty() ? "file-order-first-match-unverified" : "world1-reference",
+             selected->first.c_str(), weather_ref_resolved ? "world1-reference" : "file-order-first-match-unverified",
              g_sky_color[0] * 255.0f, g_sky_color[1] * 255.0f, g_sky_color[2] * 255.0f,
              g_fog_start, fog_start_record.c_str());
     } else {
