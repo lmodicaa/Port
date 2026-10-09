@@ -81,36 +81,46 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
 
     size_t root_end = r.pos + root.size;
     
-    // El primer hijo de RW_WORLD es RW_STRUCT
+    // El primer hijo de RW_WORLD es RW_STRUCT.
     ChunkHeader ws_hdr = r.read_chunk();
-    if (r.failed || ws_hdr.size < 60 || !r.can_read(ws_hdr.size) ||
+    constexpr uint32_t RW_WORLD_STRUCT_SIZE = 64;
+    if (r.failed || ws_hdr.type != 0x0001 ||
+        ws_hdr.size != RW_WORLD_STRUCT_SIZE ||
+        !r.can_read(ws_hdr.size) ||
         r.pos > root_end || ws_hdr.size > root_end - r.pos) {
-        LOGE("BSP: struct del mundo truncado");
+        LOGE("BSP: struct RW_WORLD inválido (type=0x%04X size=%u; esperado 64 bytes)",
+             ws_hdr.type, ws_hdr.size);
         return model;
     }
-    if (ws_hdr.type != 0x0001) return model;
 
-    // ── Struct del mundo (84 bytes). Layout RW 3.6 (ver parse_bsp.py):
-    //   +0  rootIsWorldSector (int)
-    //   +4  invWorldOrigin[3] (float)
-    //   +16 ambientColor[4]   (float)  <- iluminación ambiente del nivel
-    //   +32 dirAmbientColor[4](float)  <- luz direccional (color)
-    //   +48 lightDirection[3] (float)  <- dirección de la luz
-    //   +60 numTriangles ... +80 format
     {
-        size_t ws_start = r.pos;
-        r.skip(4);   // rootIsWorldSector
-        r.skip(12);  // invWorldOrigin[3]
-        for (int i = 0; i < 4; i++) model.world.ambient[i]     = r.read<float>();
-        for (int i = 0; i < 4; i++) model.world.dir_ambient[i] = r.read<float>();
-        for (int i = 0; i < 3; i++) model.world.light_dir[i]   = r.read<float>();
-        model.world.valid = true;
-        LOGI("World ambient=(%.3f %.3f %.3f) dirAmbient=(%.3f %.3f %.3f) lightDir=(%.3f %.3f %.3f)",
-             model.world.ambient[0], model.world.ambient[1], model.world.ambient[2],
-             model.world.dir_ambient[0], model.world.dir_ambient[1], model.world.dir_ambient[2],
-             model.world.light_dir[0], model.world.light_dir[1], model.world.light_dir[2]);
-        // Saltar el resto del struct hasta su final
-        r.pos = ws_start + ws_hdr.size;
+        const size_t ws_start = r.pos;
+        model.world.root_is_world_sector = r.read<uint32_t>(); // +0
+        for (int i = 0; i < 3; ++i) {
+            model.world.inv_world_origin[i] = r.read<float>(); // +4
+        }
+        model.world.num_triangles = r.read<uint32_t>();       // +16
+        model.world.num_vertices = r.read<uint32_t>();        // +20
+        model.world.num_plane_sectors = r.read<uint32_t>();   // +24
+        model.world.num_atomic_sectors = r.read<uint32_t>();  // +28
+        model.world.col_sector_size = r.read<uint32_t>();     // +32
+        model.world.format = r.read<uint32_t>();              // +36
+        for (int i = 0; i < 3; ++i) {
+            model.world.bbox_sup[i] = r.read<float>();        // +40
+        }
+        for (int i = 0; i < 3; ++i) {
+            model.world.bbox_inf[i] = r.read<float>();        // +52
+        }
+        // RW_WORLD no aporta datos de iluminación en este layout.
+        model.world.valid = false;
+        if (r.failed || r.pos != ws_start + RW_WORLD_STRUCT_SIZE) {
+            LOGE("BSP: lectura incompleta del struct RW_WORLD");
+            return DFFModel{};
+        }
+        LOGI("RW_WORLD: bytes=64 triangles=%u vertices=%u planeSectors=%u atomicSectors=%u format=%u; lighting=unavailable",
+             model.world.num_triangles, model.world.num_vertices,
+             model.world.num_plane_sectors, model.world.num_atomic_sectors,
+             model.world.format);
     }
 
     // El segundo hijo de RW_WORLD es RW_MATERIAL_LIST.
@@ -224,6 +234,10 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
     
     model.indices_by_mat.resize(model.material_textures.size());
 
+    // Contraste de los conteos declarados en RW_WORLD con la geometría de sectores.
+    uint64_t parsed_sector_triangles = 0;
+    uint64_t parsed_sector_vertices = 0;
+
     // Ahora parseamos todo recursivamente buscando ATOMICSECTORs (0x0009)
     while (r.pos < root_end) {
         if (r.pos > root_end || sizeof(ChunkHeader) > root_end - r.pos) {
@@ -256,6 +270,9 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
                      numVert, numTri, st.size);
                 return DFFModel{};
             }
+
+            parsed_sector_triangles += numTri;
+            parsed_sector_vertices += numVert;
 
             if (numVert > 0 && numTri > 0) {
                 uint32_t vertex_offset = (uint32_t)model.vertices.size();
@@ -350,6 +367,31 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
         LOGE("BSP: lectura fuera de límites; se descarta el modelo");
         return DFFModel{};
     }
+
+    uint64_t parsed_index_count = 0;
+    for (const auto& indices : model.indices_by_mat) {
+        parsed_index_count += indices.size();
+    }
+    const uint64_t parsed_index_triangles = parsed_index_count / 3u;
+    const bool sector_counts_match =
+        parsed_sector_triangles == model.world.num_triangles &&
+        parsed_sector_vertices == model.world.num_vertices;
+    const bool geometry_counts_match =
+        model.vertices.size() == model.world.num_vertices &&
+        parsed_index_triangles == model.world.num_triangles;
+
+    LOGI("RW_WORLD count check: header=(%u tris,%u verts) sectors=(%llu tris,%llu verts) geometry=(%zu verts,%llu indexed tris) match=%s",
+         model.world.num_triangles, model.world.num_vertices,
+         static_cast<unsigned long long>(parsed_sector_triangles),
+         static_cast<unsigned long long>(parsed_sector_vertices),
+         model.vertices.size(),
+         static_cast<unsigned long long>(parsed_index_triangles),
+         (sector_counts_match && geometry_counts_match) ? "YES" : "NO");
+    if (!sector_counts_match || !geometry_counts_match) {
+        LOGE("BSP: conteos RW_WORLD no coinciden con geometría; modelo rechazado");
+        return DFFModel{};
+    }
+
     model.valid = true;
     return model;
 }
