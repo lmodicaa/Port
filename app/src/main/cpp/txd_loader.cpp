@@ -258,18 +258,18 @@ static TXDTexture parse_texture_native(Reader& r, size_t chunk_end) {
         return tex;
     }
     
-    // Manhunt PC hack: Texturas DXT no marcadas con FourCC
+    const size_t pixel_count = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+    // Manhunt PC hack: Texturas DXT no marcadas con FourCC.
     if (dxt_type == 0 && data_size > 0) {
-        if (data_size == (width * height) / 2) {
+        if (data_size == pixel_count / 2) {
             dxt_type = 1; // 0.5 bytes per pixel -> DXT1
-        } else if (data_size == (width * height) && (raster_fmt & 0x6000) == 0) {
+        } else if (data_size == pixel_count && (raster_fmt & 0x6000) == 0) {
             dxt_type = 3; // 1 byte per pixel sin paleta -> DXT3 (o 5)
         }
     }
 
     const uint8_t* pixels = r.base + r.pos;
-
-    const size_t pixel_count = static_cast<size_t>(width) * static_cast<size_t>(height);
     if (pixel_count > static_cast<size_t>(-1) / 4) {
         LOGE("TXD: dimensiones desbordadas (%u x %u)", width, height);
         return tex;
@@ -308,9 +308,9 @@ static TXDTexture parse_texture_native(Reader& r, size_t chunk_end) {
         tex.rgba.resize(pixel_count * 4);
         if (depth == 16) {
             uint32_t fmt = raster_fmt & 0x0F00;
-            const uint16_t* px16 = reinterpret_cast<const uint16_t*>(pixels);
-            for (int i = 0; i < width * height; i++) {
-                uint16_t c = px16[i];
+            for (size_t i = 0; i < pixel_count; ++i) {
+                uint16_t c = 0;
+                std::memcpy(&c, pixels + i * sizeof(uint16_t), sizeof(c));
                 if (fmt == 0x0100) {
                     tex.rgba[i*4+0] = ((c >> 10) & 0x1F) * 255 / 31;
                     tex.rgba[i*4+1] = ((c >> 5)  & 0x1F) * 255 / 31;
@@ -331,7 +331,7 @@ static TXDTexture parse_texture_native(Reader& r, size_t chunk_end) {
             LOGI("16-bit convertido %dx%d (raster_fmt=0x%08X) size=%d", width, height, raster_fmt, data_size);
         } else if (depth == 32 || depth == 24) {
             int bpp = depth / 8;
-            for (int i = 0; i < width * height; i++) {
+            for (size_t i = 0; i < pixel_count; ++i) {
                 if (bpp == 4) {
                     tex.rgba[i*4+0] = pixels[i*4+2];
                     tex.rgba[i*4+1] = pixels[i*4+1];
