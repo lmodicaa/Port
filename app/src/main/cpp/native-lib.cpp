@@ -1233,8 +1233,15 @@ static void load_asylum_environment() {
     } else {
         LOGI("ENV: levelSetup.ini cargado desde '%s'", setup_path_used.c_str());
     }
-    const auto setup = parse_ini_records(setup_bytes);
+    std::vector<std::string> setup_order;
+    const auto setup = parse_ini_records(setup_bytes, &setup_order);
     auto world = setup.find("WORLD1");
+    bool sky_from_local_setup = false;
+    bool fog_start_from_local_setup = false;
+    bool far_clip_from_local_setup = false;
+    std::string sky_source = "fallback_fog_color";
+    std::string fog_start_source = "fallback_default_30.0";
+    std::string far_clip_source = "fallback_default_120.0";
     if (world == setup.end()) {
         LOGE("ENV: levelSetup.ini no contiene RECORD world1; se conservan valores de respaldo");
     } else {
@@ -1261,6 +1268,66 @@ static void load_asylum_environment() {
              type != fields.end() ? type->second.c_str() : "(missing)",
              g_near_clip, g_far_clip,
              ambient != fields.end() ? ambient->second.c_str() : "(missing)");
+    }
+
+    // El levelSetup del propio nivel puede definir registros climáticos
+    // (CLOUDY, WINDY, etc.). Tienen prioridad sobre WEATHER.INI global.
+    auto local_weather = setup.end();
+    std::string wanted_local_weather;
+    if (world != setup.end()) {
+        for (const char* key : {"WEATHER", "WEATHER_TYPE", "WEATHER_ID"}) {
+            auto it = world->second.find(key);
+            if (it != world->second.end()) { wanted_local_weather = ini_key(it->second); break; }
+        }
+    }
+    if (!wanted_local_weather.empty()) local_weather = setup.find(wanted_local_weather);
+    if (local_weather == setup.end()) {
+        for (const auto& name : setup_order) {
+            const auto it = setup.find(name);
+            if (it != setup.end() &&
+                (it->second.count("SKY") || it->second.count("FOGSTART") ||
+                 it->second.count("FARCLIP") || it->second.count("FAR_CLIP"))) {
+                local_weather = it;
+                break;
+            }
+        }
+    }
+    if (local_weather != setup.end()) {
+        const auto& climate = local_weather->second;
+        auto sky = climate.find("SKY");
+        if (sky != climate.end()) {
+            const auto rgb = parse_ini_numbers(sky->second);
+            if (rgb.size() >= 3) {
+                for (int i = 0; i < 3; ++i)
+                    g_sky_color[i] = std::clamp(rgb[i] / 255.0f, 0.0f, 1.0f);
+                sky_from_local_setup = true;
+                sky_source = "levelSetup.ini:" + local_weather->first;
+            }
+        }
+        auto fog_start = climate.find("FOGSTART");
+        if (fog_start != climate.end()) {
+            const auto values = parse_ini_numbers(fog_start->second);
+            if (!values.empty() && values[0] >= 0.0f) {
+                g_fog_start = values[0];
+                fog_start_from_local_setup = true;
+                fog_start_source = "levelSetup.ini:" + local_weather->first;
+            }
+        }
+        auto far_clip = climate.find("FARCLIP");
+        if (far_clip == climate.end()) far_clip = climate.find("FAR_CLIP");
+        if (far_clip != climate.end()) {
+            const auto values = parse_ini_numbers(far_clip->second);
+            if (!values.empty() && values[0] > g_near_clip) {
+                g_far_clip = values[0];
+                far_clip_from_local_setup = true;
+                far_clip_source = "levelSetup.ini:" + local_weather->first;
+            }
+        }
+        LOGI("ENV local climate: record='%s' SKY=%s FOGSTART=%s FARCLIP=%s",
+             local_weather->first.c_str(),
+             sky_from_local_setup ? "loaded" : "missing/invalid",
+             fog_start_from_local_setup ? "loaded" : "missing/invalid",
+             far_clip_from_local_setup ? "loaded" : "missing/invalid");
     }
 
     // Weather records can vary by climate/state. Select a named record only
@@ -1336,10 +1403,11 @@ static void load_asylum_environment() {
                 }
             }
         }
-        if (!sky_value.empty()) {
+        if (!sky_from_local_setup && !sky_value.empty()) {
             const auto rgb = parse_ini_numbers(sky_value);
             if (rgb.size() >= 3) {
                 for (int i = 0; i < 3; ++i) g_sky_color[i] = std::clamp(rgb[i] / 255.0f, 0.0f, 1.0f);
+                sky_source = "WEATHER.INI:" + sky_record;
             }
         }
         std::string fog_start_value;
@@ -1360,25 +1428,51 @@ static void load_asylum_environment() {
                 }
             }
         }
-        if (!fog_start_value.empty()) {
+        if (!fog_start_from_local_setup && !fog_start_value.empty()) {
             const auto values = parse_ini_numbers(fog_start_value);
-            if (!values.empty() && values[0] >= 0.0f) g_fog_start = values[0];
-        } else {
-            fog_start_record = "fallback_default_30.0";
+            if (!values.empty() && values[0] >= 0.0f) {
+                g_fog_start = values[0];
+                fog_start_source = "WEATHER.INI:" + fog_start_record;
+            }
         }
-        LOGI("ENV weather: record='%s' selection=%s SKY=(%.2f,%.2f,%.2f)/255 sky_source='%s' FOGSTART=%.3f fog_source='%s'",
+        LOGI("ENV global weather: record='%s' selection=%s SKY_candidate='%s' FOGSTART_candidate='%s'",
              selected->first.c_str(), weather_ref_resolved ? "world1-reference" : "file-order-first-match-unverified",
-             g_sky_color[0] * 255.0f, g_sky_color[1] * 255.0f, g_sky_color[2] * 255.0f,
-             sky_record.c_str(), g_fog_start, fog_start_record.c_str());
+             sky_record.c_str(), fog_start_record.c_str());
     } else {
-        LOGE("ENV: no se encontró WEATHER.INI con SKY/FOGSTART; cielo=fog color y FOGSTART de respaldo=%.3f", g_fog_start);
-        for (int i = 0; i < 3; ++i) g_sky_color[i] = g_fog_color[i];
+        LOGE("ENV: WEATHER.INI global no disponible o sin registros climáticos utilizables; se conservan valores locales o fallbacks");
+        if (!sky_from_local_setup) {
+            for (int i = 0; i < 3; ++i) g_sky_color[i] = g_fog_color[i];
+            sky_source = "fallback_fog_color";
+        }
+    }
+    if (!sky_from_local_setup && sky_source == "fallback_fog_color" &&
+        weather_path_used.empty()) {
+        LOGE("ENV ERROR: SKY sin fuente válida; se usa FOG_COLOUR como fallback");
+    }
+    if (!fog_start_from_local_setup && fog_start_source == "fallback_default_30.0") {
+        LOGE("ENV ERROR: FOGSTART sin fuente válida; se usa 30.0 como fallback");
+    }
+    if (!far_clip_from_local_setup && far_clip_source == "fallback_default_120.0") {
+        LOGE("ENV: FAR_CLIP no vino de un registro climático; valor actual %.3f (world1 o default)", g_far_clip);
+        far_clip_source = world != setup.end() && world->second.count("FAR_CLIP")
+            ? "levelSetup.ini:world1" : "fallback_default_120.0";
     }
     if (g_fog_start >= g_far_clip) {
         LOGE("ENV: FOGSTART %.3f >= FAR_CLIP %.3f; se limita fog start a 80%% de FAR_CLIP",
              g_fog_start, g_far_clip);
         g_fog_start = g_far_clip * 0.8f;
+        fog_start_source += ":clamped_to_80_percent_far_clip";
     }
+    LOGI("ENV SUMMARY: sky=(%.2f,%.2f,%.2f)/255 source='%s'%s fog_color=(%.2f,%.2f,%.2f,%.2f)/255 fog_type=%s FOGSTART=%.3f source='%s'%s NEAR_CLIP=%.3f source='%s' FAR_CLIP=%.3f source='%s'%s",
+         g_sky_color[0] * 255.0f, g_sky_color[1] * 255.0f, g_sky_color[2] * 255.0f,
+         sky_source.c_str(), sky_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "",
+         g_fog_color[0] * 255.0f, g_fog_color[1] * 255.0f, g_fog_color[2] * 255.0f, g_fog_color[3] * 255.0f,
+         g_linear_fog_enabled ? "LINEAR" : "DISABLED",
+         g_fog_start, fog_start_source.c_str(), fog_start_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "",
+         g_near_clip,
+         world != setup.end() && world->second.count("NEAR_CLIP") ? "levelSetup.ini:world1" : "fallback",
+         g_far_clip, far_clip_source.c_str(),
+         far_clip_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "");
 }
 
 // ── Raycast contra suelo ──────────────────────────────────────────────────────
