@@ -35,6 +35,7 @@ class ManhuntRenderer(private val assets: AssetManager, private val gamePath: St
     external fun nativeSetTouchSensitivity(percent: Float)
     external fun nativeSetLightingDebugMode(mode: Int)
     external fun nativeAdjustRenderDebug(setting: Int, direction: Int)
+    external fun nativeGetRenderDebugValue(setting: Int): Float
     external fun nativeNextDebugAnimation()
     external fun nativeSetCashTransform(
         posX: Float,
