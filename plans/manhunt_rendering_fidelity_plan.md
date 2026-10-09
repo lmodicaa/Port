@@ -106,3 +106,29 @@ flowchart TD
 - El modo `EXPERIMENTAL: luz Cash` aplica a Cash una suma simple de ambiente + direccional basada en la normal. Los controles de ambiente e intensidad direccional son exploratorios y no representan parámetros medidos del juego original.
 - No hay un multiplicador/gamma "correcto" fijado: hace falta una captura de referencia del juego PC, idealmente con cámara, exposición, nivel y pose comparables.
 - `MaterialData.texture` se rellena con el nombre leído del chunk Texture en los parsers BSP y DFF; queda vacío si el material no contiene nombre de textura.
+
+
+## Asylum: entorno, INST y prueba de brillo (2026-10-09)
+
+### Entorno cargado desde archivos del nivel
+
+- El código intenta leer `levels/asylum/levelSetup.ini`, registro `world1`, y registra los valores originales de `FOG_COLOUR`, `FOG_TYPE`, `NEAR_CLIP` y `FAR_CLIP`.
+- Para los valores reportados en el archivo Asylum: `FOG_COLOUR 6,6,6,0` se normaliza RGB a `6/255 = 0.0235`; `NEAR_CLIP=0.1`; `FAR_CLIP=120`. El color de limpieza/cielo se toma de `SKY` en el primer registro utilizable de `WEATHER.INI`, normalizado desde la escala 0–255 asumida. Si `world1` no permite vincular inequívocamente un registro climático, el log lo marca como `first-match-unverified`.
+- Se aplica niebla lineal solo si el registro `world1` dice `FOG_TYPE LINEAR`, con `FOGSTART` leído del registro climático seleccionado y `FOGEND=FAR_CLIP`. El valor de referencia aportado para `FOGSTART` es 30.0; la selección del registro climático no se considera probada hasta revisar los logs reales del dispositivo.
+- No se interpreta `AMBIENT 0,0,0,0` como una fuente de luz: solo se registra como dato de configuración cuando corresponda; no se inventa iluminación global a partir de ese campo.
+
+### INST: parámetros sin nombre
+
+- `EntityInst.parameters` conserva los int32 posteriores a la cadena de clase, en orden, y los vuelca para clases que contienen `Light_Inst`. No se asigna significado a ningún índice.
+- La luz experimental busca la instancia cuyo nombre/modelo/clase contenga `Dynamic_light1_(L)`; si no existe en los INST cargados, el log lo declara y no inventa una posición. La luz puntual solo afecta a Cash en el modo experimental del panel.
+- La atenuación usada actualmente es provisional: `1 / (1 + 0.09*d + 0.032*d*d)`. No está calibrada contra el ejecutable original ni debe confundirse con la fórmula original.
+
+### Análisis de brillo x1 / x2 / x3 después del cielo/niebla
+
+- En la inspección previa de los vértices BSP, la media de color era aproximadamente 32/255 por canal (estadística agregada previa, no una captura renderizada). Sin clipping, los multiplicadores darían como estimación lineal de entrada: x1 ≈ 32/255 = 0.125; x2 ≈ 64/255 = 0.251; x3 ≈ 96/255 = 0.376. No es posible inferir la media real tras multiplicación solo a partir de la media original porque los canales que superan 255 se saturan.
+- Con `FOG_COLOUR=(6,6,6)`, la mezcla lineal acerca las superficies a 6/255 (≈0.0235 por canal) al alcanzar 120 unidades; con `FOGSTART=30`, la mezcla comienza allí y llega a la niebla en FAR_CLIP. El color SKY 10–12/255 (≈0.039–0.047) afecta al fondo despejado, no reemplaza el color de niebla.
+- Esta estimación describe la matemática del shader, no el brillo percibido final. No se midió una captura renderizada x1/x2/x3 tras estos cambios ni se comparó con una captura PC bajo la misma cámara/exposición.
+
+### Licencia y límites de referencia
+
+- Se consultó el repositorio público `Sor3nt/manhunt-toolkit` como referencia de formatos, pero su metadato de GitHub no declara una licencia. No se copió código de ese proyecto; los cambios de este port son una implementación propia basada en los campos descritos y en los datos aportados.
