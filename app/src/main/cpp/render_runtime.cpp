@@ -53,9 +53,6 @@ in vec3  v_normal;
 uniform sampler2D u_tex;
 uniform int u_has_tex;
 
-uniform vec4 u_world_ambient;
-uniform vec4 u_dir_ambient;
-uniform vec3 u_light_dir;
 uniform int u_lighting_debug_mode;
 
 uniform vec4 u_mat_color;
@@ -70,26 +67,21 @@ void main() {
         tex_color = texture(u_tex, v_uv);
     }
 
-    // RenderWare: textura * color de vértice * color del material.
-    vec4 base = tex_color * v_color * u_mat_color;
-
-    if (base.a < 0.1) discard;
-
-    // Debug modes: 0=sin luz, 1=World combinado, 2=ambient solo,
-    // 3=dirAmbient solo. El modo 0 conserva exactamente el resultado previo.
-    vec3 lit_rgb = base.rgb;
-    if (u_lighting_debug_mode == 1) {
-        float ndotl = max(dot(normalize(v_normal), normalize(-u_light_dir)), 0.0);
-        vec3 world_light = u_world_ambient.rgb + u_dir_ambient.rgb * ndotl;
-        lit_rgb = base.rgb * world_light;
-    } else if (u_lighting_debug_mode == 2) {
-        lit_rgb = base.rgb * u_world_ambient.rgb;
-    } else if (u_lighting_debug_mode == 3) {
-        float ndotl = max(dot(normalize(v_normal), normalize(-u_light_dir)), 0.0);
-        lit_rgb = base.rgb * u_dir_ambient.rgb * ndotl;
+    // Modos de diagnóstico sin luz de mundo ficticia:
+    // 0 = prelit (color de vértice)
+    // 1 = prelit * color del material
+    // 2 = textura sola (blanco si el grupo no tiene textura)
+    vec4 output_color;
+    if (u_lighting_debug_mode == 0) {
+        output_color = v_color;
+    } else if (u_lighting_debug_mode == 1) {
+        output_color = v_color * u_mat_color;
+    } else {
+        output_color = tex_color;
     }
 
-    frag_color = vec4(lit_rgb, base.a);
+    if (output_color.a < 0.1) discard;
+    frag_color = output_color;
 })";
 
 
