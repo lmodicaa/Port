@@ -1200,7 +1200,11 @@ static std::map<std::string, std::map<std::string, std::string>> parse_ini_recor
         if (current_record.empty()) continue;
         const size_t key_end = line.find_first_of(" \t");
         if (key_end == std::string::npos) continue;
-        const std::string value = trim_ini(line.substr(key_end + 1));
+        std::string value = trim_ini(line.substr(key_end + 1));
+        if (!value.empty() && value.back() == ';') {
+            value.pop_back();
+            value = trim_ini(std::move(value));
+        }
         records[current_record][key] = value;
     }
     return records;
