@@ -21,6 +21,10 @@ public:
         return pos_;
     }
 
+    size_t remaining() const {
+        return pos_ <= size_ ? size_ - pos_ : 0;
+    }
+
     void seek(size_t position) {
         if (position > size_ || (position != 0 && data_ == nullptr)) {
             throw std::runtime_error("IFP seek out of range");
@@ -290,6 +294,14 @@ static AnimationTrack readTrack(Reader2& reader)
         }
     }
 
+    const size_t min_frame_bytes =
+        (frameType == 1) ? 8u : (frameType == 2 ? 14u : 6u);
+    if (frameCount > reader.remaining() / min_frame_bytes) {
+        throw std::runtime_error(
+            "IFP frame count exceeds minimum remaining bytes: " +
+            std::to_string(frameCount)
+        );
+    }
     track.keyframes.reserve(frameCount);
 
     float currentTime = 0.0f;
@@ -448,6 +460,12 @@ std::map<std::string, Animation> load_ifp(
         reader.expect("ANCT");
 
         const uint32_t blockCount = reader.u32();
+        if (blockCount > reader.remaining() / 16u) {
+            throw std::runtime_error(
+                "IFP block count exceeds minimum remaining bytes: " +
+                std::to_string(blockCount)
+            );
+        }
 
         LOGI(
             "IFP: %u bloques encontrados",
@@ -488,6 +506,12 @@ std::map<std::string, Animation> load_ifp(
 
             const uint32_t animationCount =
                 reader.u32();
+            if (animationCount > reader.remaining() / 16u) {
+                throw std::runtime_error(
+                    "IFP animation count exceeds minimum remaining bytes: " +
+                    std::to_string(animationCount)
+                );
+            }
 
             LOGI(
                 "Bloque %s: %u animaciones",
@@ -539,6 +563,12 @@ std::map<std::string, Animation> load_ifp(
                  */
                 const uint32_t boneCount =
                     reader.u32();
+                if (boneCount > reader.remaining() / 11u) {
+                    throw std::runtime_error(
+                        "IFP track count exceeds minimum remaining bytes: " +
+                        std::to_string(boneCount)
+                    );
+                }
 
                 /*
                  * Chunk size.
