@@ -458,7 +458,7 @@ if start_idx != -1 and end_idx != -1:
 """
 
     lines = lines[:start_idx] + [new_code + '\n'] + lines[end_idx:]
-    with open('C:/Users/Administrator/Documents/Port/app/src/main/cpp/native-lib.cpp', 'w', encoding='utf-8') as f:
+    with target.open('w', encoding='utf-8') as f:
         f.writelines(lines)
     print('Done!')
 else:
