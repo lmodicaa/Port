@@ -1,6 +1,11 @@
+import argparse
+from pathlib import Path
 import struct
 
-with open('entity.inst', 'rb') as f:
+parser = argparse.ArgumentParser(description='Inspect records in a Manhunt INST file.')
+parser.add_argument('filepath', type=Path, help='Path to entity.inst')
+args = parser.parse_args()
+with args.filepath.open('rb') as f:
     data = f.read()
 
 count = struct.unpack('<I', data[:4])[0]
