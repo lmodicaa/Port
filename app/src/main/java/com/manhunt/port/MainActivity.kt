@@ -139,6 +139,32 @@ class MainActivity : Activity() {
         setContentView(R.layout.activity_main)
         val container = findViewById<android.widget.FrameLayout>(R.id.main_container)
         container.addView(glView, 0)
+
+        // Debug de iluminación: comparar variantes en una sola sesión.
+        val lightingLabels = arrayOf("Luz: sin luz", "Luz: mundo", "Luz: ambient", "Luz: dirAmbient")
+        var lightingMode = 0
+        renderer.nativeSetLightingDebugMode(lightingMode)
+        val lightingButton = Button(this).apply {
+            text = lightingLabels[lightingMode]
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setBackgroundColor(Color.argb(190, 0, 0, 0))
+            setOnClickListener {
+                lightingMode = (lightingMode + 1) % lightingLabels.size
+                renderer.nativeSetLightingDebugMode(lightingMode)
+                text = lightingLabels[lightingMode]
+            }
+        }
+        val lightingButtonParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.END
+        )
+        val lightingButtonMargin = (18 * resources.displayMetrics.density).toInt()
+        lightingButtonParams.topMargin = lightingButtonMargin
+        lightingButtonParams.marginEnd = lightingButtonMargin
+        container.addView(lightingButton, lightingButtonParams)
         
 
 
