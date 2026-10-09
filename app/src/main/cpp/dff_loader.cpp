@@ -254,7 +254,7 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
             const size_t atomic_end =
                 r.pos + hdr.size;
 
-            if (r.pos + sizeof(ChunkHeader) <= atomic_end) {
+            if (r.pos <= atomic_end && sizeof(ChunkHeader) <= atomic_end - r.pos && r.can_read(sizeof(ChunkHeader))) {
                 const ChunkHeader astruct =
                     r.read_chunk();
 
