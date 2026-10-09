@@ -1240,6 +1240,9 @@ static void load_asylum_environment() {
     bool fog_start_from_local_setup = false;
     bool far_clip_from_local_setup = false;
     std::string sky_source = "fallback_fog_color";
+    std::string fog_color_source = "fallback_default_6_6_6";
+    std::string fog_type_source = "fallback_default_linear";
+    std::string near_clip_source = "fallback_default_0.1";
     std::string fog_start_source = "fallback_default_30.0";
     std::string far_clip_source = "fallback_default_120.0";
     if (world == setup.end()) {
@@ -1254,14 +1257,22 @@ static void load_asylum_environment() {
         if (fog.size() >= 3) {
             for (int i = 0; i < 3; ++i) g_fog_color[i] = std::clamp(fog[i] / 255.0f, 0.0f, 1.0f);
             g_fog_color[3] = fog.size() >= 4 ? std::clamp(fog[3] / 255.0f, 0.0f, 1.0f) : 1.0f;
+            fog_color_source = "levelSetup.ini:world1:FOG_COLOUR";
         }
         const auto near_clip = read_numbers("NEAR_CLIP");
         const auto far_clip = read_numbers("FAR_CLIP");
-        if (!near_clip.empty() && near_clip[0] > 0.0f) g_near_clip = near_clip[0];
-        if (!far_clip.empty() && far_clip[0] > g_near_clip) g_far_clip = far_clip[0];
+        if (!near_clip.empty() && near_clip[0] > 0.0f) {
+            g_near_clip = near_clip[0];
+            near_clip_source = "levelSetup.ini:world1:NEAR_CLIP";
+        }
+        if (!far_clip.empty() && far_clip[0] > g_near_clip) {
+            g_far_clip = far_clip[0];
+            far_clip_source = "levelSetup.ini:world1:FAR_CLIP";
+        }
         auto type = fields.find("FOG_TYPE");
         auto ambient = fields.find("AMBIENT");
         g_linear_fog_enabled = type != fields.end() && ini_key(type->second) == "LINEAR";
+        if (type != fields.end()) fog_type_source = "levelSetup.ini:world1:FOG_TYPE";
         LOGI("ENV world1: FOG_COLOUR raw='%s' normalized=(%.4f,%.4f,%.4f,%.4f) FOG_TYPE='%s' NEAR_CLIP=%.3f FAR_CLIP=%.3f AMBIENT='%s'",
              fields.count("FOG_COLOUR") ? fields.at("FOG_COLOUR").c_str() : "(missing)",
              g_fog_color[0], g_fog_color[1], g_fog_color[2], g_fog_color[3],
@@ -1463,14 +1474,15 @@ static void load_asylum_environment() {
         g_fog_start = g_far_clip * 0.8f;
         fog_start_source += ":clamped_to_80_percent_far_clip";
     }
-    LOGI("ENV SUMMARY: sky=(%.2f,%.2f,%.2f)/255 source='%s'%s fog_color=(%.2f,%.2f,%.2f,%.2f)/255 fog_type=%s FOGSTART=%.3f source='%s'%s NEAR_CLIP=%.3f source='%s' FAR_CLIP=%.3f source='%s'%s",
+    LOGI("ENV SUMMARY: sky=(%.2f,%.2f,%.2f)/255 source='%s'%s fog_color=(%.2f,%.2f,%.2f,%.2f)/255 source='%s'%s fog_type=%s source='%s'%s FOGSTART=%.3f source='%s'%s NEAR_CLIP=%.3f source='%s'%s FAR_CLIP=%.3f source='%s'%s",
          g_sky_color[0] * 255.0f, g_sky_color[1] * 255.0f, g_sky_color[2] * 255.0f,
          sky_source.c_str(), sky_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "",
          g_fog_color[0] * 255.0f, g_fog_color[1] * 255.0f, g_fog_color[2] * 255.0f, g_fog_color[3] * 255.0f,
-         g_linear_fog_enabled ? "LINEAR" : "DISABLED",
+         fog_color_source.c_str(), fog_color_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "",
+         g_linear_fog_enabled ? "LINEAR" : "DISABLED", fog_type_source.c_str(),
+         fog_type_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "",
          g_fog_start, fog_start_source.c_str(), fog_start_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "",
-         g_near_clip,
-         world != setup.end() && world->second.count("NEAR_CLIP") ? "levelSetup.ini:world1" : "fallback",
+         g_near_clip, near_clip_source.c_str(), near_clip_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "",
          g_far_clip, far_clip_source.c_str(),
          far_clip_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "");
 }
