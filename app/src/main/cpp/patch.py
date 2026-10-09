@@ -1,6 +1,12 @@
+import argparse
+from pathlib import Path
 import sys
-with open(r'C:\Users\IK\Documents\Port\app\src\main\cpp\txd_loader.cpp', 'r', encoding='utf-8', errors='ignore') as f:
-    lines = f.readlines()
+
+repo_root = Path(__file__).resolve().parents[4]
+parser = argparse.ArgumentParser(description='Apply the legacy TXD patch to an explicitly selected source file.')
+parser.add_argument('--target', type=Path, default=repo_root / 'app/src/main/cpp/txd_loader.cpp')
+target = parser.parse_args().target
+lines = target.read_text(encoding='utf-8', errors='ignore').splitlines(keepends=True)
 
 new_lines = []
 skip = False
@@ -63,8 +69,7 @@ if match:
         }
     }'''
     content = content.replace(old, new)
-    with open(r'C:\Users\IK\Documents\Port\app\src\main\cpp\txd_loader.cpp', 'w', encoding='utf-8') as f:
-        f.write(content)
+    target.write_text(content, encoding='utf-8')
     print("Patched successfully")
 else:
     print("Match not found")
