@@ -1,57 +1,86 @@
+#!/usr/bin/env python3
+"""Inspect the RW_WORLD header in a RenderWare BSP.
+
+For the observed Manhunt scene1.bsp, RW_WORLD's RW_STRUCT is 64 bytes.
+It contains geometry counts and a bounding box, not ambient/directional light.
+"""
 import argparse
 from pathlib import Path
 import struct
 
-def parse_bsp(filepath):
-    with open(filepath, 'rb') as f:
-        data = f.read()
+CHUNK_HEADER_SIZE = 12
+RW_WORLD = 0x000B
+RW_STRUCT = 0x0001
+RW_WORLD_STRUCT_SIZE = 64
 
-    def read_chunk(pos):
-        ctype, size, ver = struct.unpack('<III', data[pos:pos+12])
-        return ctype, size, pos+12
 
-    ctype, size, pos = read_chunk(0)
-    assert ctype == 0x000B, f"Expected 0x000B, got {ctype:04X}"
-    
-    stype, ssize, spos = read_chunk(pos)
-    assert stype == 0x0001, "Expected struct"
-    
-    # RenderWare 3.6 RW_WORLD struct:
-    # int32 rootIsWorldSector
-    # float32 invWorldOrigin[3]
-    # float32 ambientColor[4] or uint8[4]? usually float in RW3.4+ but let's check size
-    # float32 directionalAmbientColor[4]
-    # float32 lightDirection[3]
-    # int32 numTriangles
-    # int32 numVertices
-    # int32 numPlaneSectors
-    # int32 numWorldSectors
-    # int32 colSectorSize
-    # int32 format
-    
-    # Let's just unpack it as ints and floats to see
-    vals = struct.unpack(f'<{ssize//4}I', data[spos:spos+ssize])
-    print(f"World Struct Size: {ssize}")
-    print(f"Vals as HEX:")
-    for i, v in enumerate(vals):
-        print(f"  {i}: {v:08X} ({v})")
-        
-    # The format is usually at offset... wait.
-    # If size is e.g. 84 bytes:
-    # 0: rootIsWorldSector (4)
-    # 1,2,3: invWorldOrigin (12)
-    # 4,5,6,7: ambient (16)
-    # 8,9,10,11: dir ambient (16)
-    # 12,13,14: light dir (12)
-    # 15: numTriangles (4)
-    # 16: numVertices (4)
-    # 17: numPlaneSectors (4)
-    # 18: numWorldSectors (4)
-    # 19: colSectorSize (4)
-    # 20: format (4)
-    # Total = 21 * 4 = 84 bytes!
+def read_chunk(data: bytes, pos: int):
+    if pos < 0 or pos + CHUNK_HEADER_SIZE > len(data):
+        raise ValueError(f"Chunk header out of bounds at 0x{pos:X}")
+    ctype, size, version = struct.unpack_from("<III", data, pos)
+    payload = pos + CHUNK_HEADER_SIZE
+    end = payload + size
+    if end > len(data):
+        raise ValueError(
+            f"Chunk 0x{ctype:04X} at 0x{pos:X} exceeds file "
+            f"(size={size}, file={len(data)})"
+        )
+    return ctype, size, version, payload, end
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Inspect a RenderWare BSP/World file.')
-    parser.add_argument('filepath', type=Path, help='Path to scene1.bsp or another BSP file')
+
+def parse_bsp(filepath: Path):
+    data = filepath.read_bytes()
+    ctype, _, _, world_payload, world_end = read_chunk(data, 0)
+    if ctype != RW_WORLD:
+        raise ValueError(f"Expected RW_WORLD 0x000B, got 0x{ctype:04X}")
+
+    stype, ssize, _, struct_payload, struct_end = read_chunk(data, world_payload)
+    if stype != RW_STRUCT:
+        raise ValueError(f"Expected RW_STRUCT 0x0001, got 0x{stype:04X}")
+    if ssize != RW_WORLD_STRUCT_SIZE:
+        raise ValueError(
+            f"Expected RW_WORLD struct size 64, got {ssize}; "
+            "refusing to apply this layout to an unknown variant"
+        )
+    if struct_end > world_end:
+        raise ValueError("RW_WORLD struct extends beyond RW_WORLD chunk")
+
+    # Layout (all fields little-endian):
+    # +0  uint32 rootIsWorldSector
+    # +4  float invWorldOrigin[3]
+    # +16 uint32 numTriangles
+    # +20 uint32 numVertices
+    # +24 uint32 numPlaneSectors
+    # +28 uint32 numAtomicSectors
+    # +32 uint32 colSectorSize
+    # +36 uint32 format
+    # +40 float bboxSup[3]
+    # +52 float bboxInf[3]
+    values = struct.unpack_from("<I3f6I6f", data, struct_payload)
+    (root_is_world_sector, *rest) = values
+    inv_world_origin = rest[0:3]
+    num_triangles, num_vertices, num_plane_sectors, num_atomic_sectors, col_sector_size, fmt = rest[3:9]
+    bbox_sup = rest[9:12]
+    bbox_inf = rest[12:15]
+
+    print(f"File: {filepath}")
+    print(f"RW_WORLD struct size: {ssize} bytes")
+    print(f"+00 rootIsWorldSector: {root_is_world_sector}")
+    print(f"+04 invWorldOrigin: {inv_world_origin}")
+    print(f"+16 numTriangles: {num_triangles}")
+    print(f"+20 numVertices: {num_vertices}")
+    print(f"+24 numPlaneSectors: {num_plane_sectors}")
+    print(f"+28 numAtomicSectors: {num_atomic_sectors}")
+    print(f"+32 colSectorSize: {col_sector_size}")
+    print(f"+36 format: 0x{fmt:08X} ({fmt})")
+    print(f"+40 bboxSup: {bbox_sup}")
+    print(f"+52 bboxInf: {bbox_inf}")
+    print("Lighting fields in RW_WORLD: unavailable (not present in this layout).")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Inspect the 64-byte RenderWare RW_WORLD struct in a BSP."
+    )
+    parser.add_argument("filepath", type=Path, help="Path to scene1.bsp or another BSP")
     parse_bsp(parser.parse_args().filepath)
