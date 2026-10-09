@@ -9,6 +9,7 @@ import android.view.ViewGroup
 import android.graphics.Color
 import android.util.TypedValue
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.widget.Button
@@ -140,8 +141,14 @@ class MainActivity : Activity() {
         val container = findViewById<android.widget.FrameLayout>(R.id.main_container)
         container.addView(glView, 0)
 
-        // Vistas de diagnóstico de color; no representan luces del motor original.
-        val lightingLabels = arrayOf("Debug: prelit", "Debug: prelit × material", "Debug: textura sola")
+        // Diagnóstico visual. El modo 4 es experimental, no la fórmula original.
+        val lightingLabels = arrayOf(
+            "Debug: prelit",
+            "Debug: prelit × material",
+            "Debug: textura sola",
+            "Debug: prelit boosted",
+            "EXPERIMENTAL: luz Cash"
+        )
         var lightingMode = 0
         renderer.nativeSetLightingDebugMode(lightingMode)
         val lightingButton = Button(this).apply {
@@ -149,22 +156,73 @@ class MainActivity : Activity() {
             isAllCaps = false
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            setBackgroundColor(Color.argb(190, 0, 0, 0))
+            setBackgroundColor(Color.argb(210, 0, 0, 0))
             setOnClickListener {
                 lightingMode = (lightingMode + 1) % lightingLabels.size
                 renderer.nativeSetLightingDebugMode(lightingMode)
                 text = lightingLabels[lightingMode]
             }
         }
+        val lightingButtonMargin = (18 * resources.displayMetrics.density).toInt()
         val lightingButtonParams = FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.TOP or Gravity.END
         )
-        val lightingButtonMargin = (18 * resources.displayMetrics.density).toInt()
         lightingButtonParams.topMargin = lightingButtonMargin
         lightingButtonParams.marginEnd = lightingButtonMargin
         container.addView(lightingButton, lightingButtonParams)
+
+        // Controles temporales de ajuste: los valores se imprimen en Logcat.
+        val debugControls = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(6, 6, 6, 6)
+            setBackgroundColor(Color.argb(185, 0, 0, 0))
+        }
+        fun addDebugAdjustment(label: String, setting: Int) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val caption = TextView(this).apply {
+                text = label
+                setTextColor(Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+                minWidth = (78 * resources.displayMetrics.density).toInt()
+            }
+            row.addView(caption)
+            fun addStepButton(textValue: String, delta: Int) {
+                val button = Button(this).apply {
+                    text = textValue
+                    isAllCaps = false
+                    setTextColor(Color.WHITE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+                    setPadding(4, 0, 4, 0)
+                    minWidth = (34 * resources.displayMetrics.density).toInt()
+                    setBackgroundColor(Color.argb(210, 45, 45, 45))
+                    setOnClickListener { renderer.nativeAdjustRenderDebug(setting, delta) }
+                }
+                row.addView(button, LinearLayout.LayoutParams(
+                    (38 * resources.displayMetrics.density).toInt(),
+                    (34 * resources.displayMetrics.density).toInt()
+                ))
+            }
+            addStepButton("−", -1)
+            addStepButton("+", 1)
+            debugControls.addView(row)
+        }
+        addDebugAdjustment("Prelit ×", 0)
+        addDebugAdjustment("Gamma", 1)
+        addDebugAdjustment("Cash ambiente*", 2)
+        addDebugAdjustment("Cash direccional*", 3)
+        val debugControlsParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.START
+        )
+        debugControlsParams.topMargin = lightingButtonMargin
+        debugControlsParams.marginStart = lightingButtonMargin
+        container.addView(debugControls, debugControlsParams)
         
 
 
