@@ -1279,27 +1279,27 @@ static void load_asylum_environment() {
                 for (int i = 0; i < 3; ++i) g_sky_color[i] = std::clamp(rgb[i] / 255.0f, 0.0f, 1.0f);
             }
         }
-        auto fog_start = selected->second.find("FOGSTART");
+        std::string fog_start_value;
         std::string fog_start_record = selected->first;
-        if (fog_start == selected->second.end()) {
+        auto selected_fog_start = selected->second.find("FOGSTART");
+        if (selected_fog_start != selected->second.end()) {
+            fog_start_value = selected_fog_start->second;
+        } else {
             for (const auto& name : weather_order) {
                 const auto it = weather.find(name);
-                if (it != weather.end() && it->second.count("FOGSTART")) {
-                    fog_start = it->second.find("FOGSTART");
-                    fog_start_record = name;
-                    break;
+                if (it != weather.end()) {
+                    const auto candidate = it->second.find("FOGSTART");
+                    if (candidate != it->second.end()) {
+                        fog_start_value = candidate->second;
+                        fog_start_record = name;
+                        break;
+                    }
                 }
             }
         }
-        if (fog_start != selected->second.end()) {
-            const auto values = parse_ini_numbers(fog_start->second);
+        if (!fog_start_value.empty()) {
+            const auto values = parse_ini_numbers(fog_start_value);
             if (!values.empty() && values[0] >= 0.0f) g_fog_start = values[0];
-        } else if (fog_start_record != selected->first) {
-            const auto record_it = weather.find(fog_start_record);
-            if (record_it != weather.end()) {
-                const auto values = parse_ini_numbers(record_it->second.at("FOGSTART"));
-                if (!values.empty() && values[0] >= 0.0f) g_fog_start = values[0];
-            }
         }
         LOGI("ENV weather: record='%s' selection=%s SKY=(%.2f,%.2f,%.2f)/255 FOGSTART=%.3f source_record='%s'",
              selected->first.c_str(), wanted_weather.empty() ? "file-order-first-match-unverified" : "world1-reference",
