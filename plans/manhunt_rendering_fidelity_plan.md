@@ -94,7 +94,7 @@ flowchart TD
 
 ## Verificación de materiales y luces: estado actual
 
-- **Verificado en el código:** el parser de materiales BSP y DFF lee RGBA, `ambient`, `specular` y `diffuse` desde el struct RenderWare de material. El renderizador envía color, ambient y diffuse como uniforms, pero los coeficientes ambient/diffuse no estaban aplicándose en la ecuación del fragment shader; el shader anterior multiplicaba colores y, en los modos 1–3, utilizaba el supuesto `RW_WORLD` como luz.
+- **Verificado en el código:** el parser de materiales BSP y DFF lee RGBA, `ambient`, `specular` y `diffuse` desde el struct RenderWare de material. El shader de diagnóstico actual usa color de vértice, color de material o textura según el modo; no aplica los coeficientes ambient/diffuse ni luz por normales. Se eliminaron los uniforms de ambient/diffuse sin uso.
 - **No verificado con valores de assets:** no se inspeccionó aquí la tabla completa de materiales de `scene1.bsp` ni de `cash_pc.dff`; por lo tanto, no afirmo qué valores ambient/diffuse tienen sus materiales.
 - **Luces dinámicas sobre Cash:** el código de port visible no contiene una fuente de luz de mundo válida derivada de `RW_WORLD`, ni una implementación confirmada de luces dinámicas por personaje. Eso no demuestra que el juego original no las use. Para confirmarlo hacen falta datos del DFF/otros chunks de luz o una inspección del ejecutable/comportamiento original.
 - **Pendiente:** extraer y registrar los materiales reales de `cash_pc.dff` y `scene1.bsp`, localizar chunks/entidades de luces y comparar capturas del juego original con las tres vistas de diagnóstico.
