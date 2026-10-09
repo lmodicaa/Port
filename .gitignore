@@ -13,3 +13,11 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+
+# Commercial Manhunt data: provide files from a legally owned copy locally.
+# These paths are removed from the current dev-autonomo tree; Git history is unchanged.
+/app/src/main/assets/levels/
+/app/src/main/assets/export/
+/app/src/main/assets/cash_pc.dff
+/app/src/main/assets/cash_pc.txd
