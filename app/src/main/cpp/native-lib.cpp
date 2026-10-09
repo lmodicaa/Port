@@ -1223,12 +1223,14 @@ static void load_asylum_environment() {
         if (!near_clip.empty() && near_clip[0] > 0.0f) g_near_clip = near_clip[0];
         if (!far_clip.empty() && far_clip[0] > g_near_clip) g_far_clip = far_clip[0];
         auto type = fields.find("FOG_TYPE");
+        auto ambient = fields.find("AMBIENT");
         g_linear_fog_enabled = type != fields.end() && ini_key(type->second) == "LINEAR";
-        LOGI("ENV world1: FOG_COLOUR raw='%s' normalized=(%.4f,%.4f,%.4f,%.4f) FOG_TYPE='%s' NEAR_CLIP=%.3f FAR_CLIP=%.3f",
+        LOGI("ENV world1: FOG_COLOUR raw='%s' normalized=(%.4f,%.4f,%.4f,%.4f) FOG_TYPE='%s' NEAR_CLIP=%.3f FAR_CLIP=%.3f AMBIENT='%s'",
              fields.count("FOG_COLOUR") ? fields.at("FOG_COLOUR").c_str() : "(missing)",
              g_fog_color[0], g_fog_color[1], g_fog_color[2], g_fog_color[3],
              type != fields.end() ? type->second.c_str() : "(missing)",
-             g_near_clip, g_far_clip);
+             g_near_clip, g_far_clip,
+             ambient != fields.end() ? ambient->second.c_str() : "(missing)");
     }
 
     // Weather records can vary by climate/state. Select a named record only
