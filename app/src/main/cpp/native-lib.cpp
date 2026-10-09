@@ -1238,7 +1238,8 @@ static void load_asylum_environment() {
     auto world = setup.find("WORLD1");
     bool sky_from_local_setup = false;
     bool fog_start_from_local_setup = false;
-    bool far_clip_from_local_setup = false;
+    float climate_farclip = -1.0f;
+    std::string climate_farclip_source = "not-found";
     std::string sky_source = "fallback_fog_color";
     std::string fog_color_source = "fallback_default_6_6_6";
     std::string fog_type_source = "fallback_default_linear";
@@ -1340,22 +1341,21 @@ static void load_asylum_environment() {
                 fog_start_source = "levelSetup.ini:" + local_weather->first;
             }
         }
-        auto far_clip = climate.find("FARCLIP");
-        if (far_clip == climate.end()) far_clip = climate.find("FAR_CLIP");
-        if (far_clip != climate.end()) {
-            const auto values = parse_ini_numbers(far_clip->second);
-            if (!values.empty() && values[0] > g_near_clip) {
-                g_far_clip = values[0];
-                far_clip_from_local_setup = true;
-                far_clip_source = "levelSetup.ini:" + local_weather->first;
+        auto climate_far = climate.find("FARCLIP");
+        if (climate_far == climate.end()) climate_far = climate.find("FAR_CLIP");
+        if (climate_far != climate.end()) {
+            const auto values = parse_ini_numbers(climate_far->second);
+            if (!values.empty() && values[0] > 0.0f) {
+                climate_farclip = values[0];
+                climate_farclip_source = "levelSetup.ini:" + local_weather->first;
             }
         }
-        LOGI("ENV local climate: record='%s' selection=%s SKY=%s FOGSTART=%s FARCLIP=%s",
+        LOGI("ENV local climate: record='%s' selection=%s SKY=%s FOGSTART=%s climate_FARCLIP=%.3f source='%s'",
              local_weather->first.c_str(),
              local_weather_ref_resolved ? "world1-reference" : "file-order-first-match-unverified",
              sky_from_local_setup ? "loaded" : "missing/invalid",
              fog_start_from_local_setup ? "loaded" : "missing/invalid",
-             far_clip_from_local_setup ? "loaded" : "missing/invalid");
+             climate_farclip, climate_farclip_source.c_str());
     }
 
     // Weather records can vary by climate/state. Select a named record only
@@ -1480,18 +1480,14 @@ static void load_asylum_environment() {
     if (!fog_start_from_local_setup && fog_start_source == "fallback_default_30.0") {
         LOGE("ENV ERROR: FOGSTART sin fuente válida; se usa 30.0 como fallback");
     }
-    if (!far_clip_from_local_setup && far_clip_source == "fallback_default_120.0") {
-        LOGE("ENV: FAR_CLIP no vino de un registro climático; valor actual %.3f (world1 o default)", g_far_clip);
+    if (far_clip_source == "fallback_default_120.0") {
+        LOGE("ENV: FAR_CLIP de world1 no válido; se conserva el valor predeterminado %.3f", g_far_clip);
         far_clip_source = world != setup.end() && world->second.count("FAR_CLIP")
-            ? "levelSetup.ini:world1" : "fallback_default_120.0";
+            ? "levelSetup.ini:world1-invalid-fallback" : "fallback_default_120.0";
     }
-    if (g_fog_start >= g_far_clip) {
-        LOGE("ENV: FOGSTART %.3f >= FAR_CLIP %.3f; se limita fog start a 80%% de FAR_CLIP",
-             g_fog_start, g_far_clip);
-        g_fog_start = g_far_clip * 0.8f;
-        fog_start_source += ":clamped_to_80_percent_far_clip";
-    }
-    LOGI("ENV SUMMARY: sky=(%.2f,%.2f,%.2f)/255 source='%s'%s fog_color=(%.2f,%.2f,%.2f,%.2f)/255 source='%s'%s fog_type=%s source='%s'%s FOGSTART=%.3f source='%s'%s NEAR_CLIP=%.3f source='%s'%s FAR_CLIP=%.3f source='%s'%s",
+    // No combinar world1.FAR_CLIP con el FARCLIP del registro climático
+    // hasta confirmar cuál gobierna el render original.
+    LOGI("ENV SUMMARY: sky=(%.2f,%.2f,%.2f)/255 source='%s'%s fog_color=(%.2f,%.2f,%.2f,%.2f)/255 source='%s'%s fog_type=%s source='%s'%s FOGSTART=%.3f source='%s'%s NEAR_CLIP=%.3f source='%s'%s WORLD1_FAR_CLIP=%.3f source='%s'%s CLIMATE_FARCLIP=%.3f source='%s'",
          g_sky_color[0] * 255.0f, g_sky_color[1] * 255.0f, g_sky_color[2] * 255.0f,
          sky_source.c_str(), sky_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "",
          g_fog_color[0] * 255.0f, g_fog_color[1] * 255.0f, g_fog_color[2] * 255.0f, g_fog_color[3] * 255.0f,
@@ -1501,7 +1497,8 @@ static void load_asylum_environment() {
          g_fog_start, fog_start_source.c_str(), fog_start_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "",
          g_near_clip, near_clip_source.c_str(), near_clip_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "",
          g_far_clip, far_clip_source.c_str(),
-         far_clip_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "");
+         far_clip_source.find("fallback") != std::string::npos ? " [FALLBACK]" : "",
+         climate_farclip, climate_farclip_source.c_str());
 }
 
 // ── Raycast contra suelo ──────────────────────────────────────────────────────
