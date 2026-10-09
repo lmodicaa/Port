@@ -647,6 +647,10 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
 
 std::map<std::string, DFFModel> dff_load_archive(const uint8_t* data, size_t size) {
     std::map<std::string, DFFModel> archive;
+    if (data == nullptr || size < sizeof(ChunkHeader)) {
+        LOGE("DFF archive: buffer nulo o demasiado pequeño (%zu bytes)", size);
+        return archive;
+    }
     Reader r{data, size};
     
     while (r.can_read(sizeof(ChunkHeader)) && !r.failed) {
