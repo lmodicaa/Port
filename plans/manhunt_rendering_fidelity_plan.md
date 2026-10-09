@@ -13,18 +13,14 @@ Todo se basa en los datos que ya están en los assets (`scene1.bsp`, `modelspc.d
 
 ## Diagnóstico (qué se desvía del original)
 
-1. **La iluminación del mundo se descarta.**
-   El struct `RW_WORLD` (84 bytes) contiene, según [`parse_bsp.py`](parse_bsp.py:37):
-   - `+16`: `ambientColor` (4 floats)
-   - `+32`: `directionalAmbientColor` (4 floats)
-   - `+48`: `lightDirection` (3 floats)
-   Pero [`bsp_loader.cpp`](app/src/main/cpp/bsp_loader.cpp:61) hace `r.skip(36); format=read()` y **tira todo**. La iluminación de la escena debe salir de aquí, no de constantes.
+1. **El layout del mundo estaba mal interpretado.**
+   El `RW_WORLD` de `scene1.bsp` mide 64 bytes. En `+16` empiezan los conteos de geometría, no colores de luz: `numTriangles`, `numVertices`, `numPlaneSectors`, `numAtomicSectors`, `colSectorSize`, `format`; desde `+40` está la caja envolvente. Por tanto, este struct no aporta `ambientColor`, `directionalAmbientColor` ni `lightDirection`. El loader ahora deja la iluminación del mundo como no disponible y compara los conteos declarados con los sectores y la geometría extraída.
 
 2. **Los materiales del BSP se saltan.**
    [`bsp_loader.cpp`](app/src/main/cpp/bsp_loader.cpp:78) hace `r.skip(mat_struct.size)` y solo guarda el nombre de textura. El struct de material RW guarda color/ambient/diffuse que el motor usa.
 
-3. **El shader ignora normales e iluminación.**
-   [`native-lib.cpp`](app/src/main/cpp/native-lib.cpp:269) hace solo `texture * vertexColor` + niebla negra fija 10→45. El original usa ambient del mundo + luz direccional + niebla por distancia.
+3. **No hay todavía una fuente de luz del mundo verificada.**
+   Los antiguos modos de debug que multiplicaban por `world.ambient`, `dir_ambient` o `light_dir` usaban bytes de conteos/caja y podían teñir la escena. Se quitaron. Los modos de diagnóstico actuales son: prelit (color de vértice), prelit × color de material y textura sola. Esto es diagnóstico, no una afirmación de que reproduzca toda la iluminación original.
 
 4. **Material sin textura = negro.**
    Si un grupo tiene `texture_id == 0`, se bindea textura 0 y `texture()*color` da negro. En el original los materiales sin textura usan su color propio.
@@ -39,16 +35,11 @@ Todo se basa en los datos que ya están en los assets (`scene1.bsp`, `modelspc.d
 
 ## Plan de trabajo
 
-### Fase 1 — Iluminación del mundo (mayor impacto visual)
+### Fase 1 — Layout real de RW_WORLD (corregido)
 
-1. **Extender `DFFModel`** (en [`dff_loader.h`](app/src/main/cpp/dff_loader.h:30)) con:
-   - `float world_ambient[4]`
-   - `float world_dir_ambient[4]`
-   - `float world_light_dir[3]`
-2. **`bsp_loader.cpp`**: al leer `RW_STRUCT` del `RW_WORLD`, leer correctamente por offset
-   (rootIsWorldSector → invWorldOrigin → ambient → dirAmbient → lightDir → counts → format),
-   en lugar de `skip(36)`. Guardar los 3 vectores en el `DFFModel`.
-3. Guardar estos valores globalmente en [`native-lib.cpp`](app/src/main/cpp/native-lib.cpp:426) (`setup_model`).
+1. Leer exactamente 64 bytes: `rootIsWorldSector` (+0), `invWorldOrigin[3]` (+4), seis enteros de conteo/formato (+16..+36) y caja envolvente (+40..+60).
+2. Mantener la iluminación del mundo como no disponible (`valid=false`); no derivar luces de estos campos.
+3. Comparar `numTriangles` y `numVertices` del header con la suma declarada de sectores y con la geometría realmente extraída. El loader rechaza el BSP si hay discrepancia.
 
 ### Fase 2 — Materiales del BSP
 
@@ -60,11 +51,8 @@ Todo se basa en los datos que ya están en los assets (`scene1.bsp`, `modelspc.d
 ### Fase 3 — Shaders fieles al original
 
 7. **Vertex shader**: calcular normal de mundo (`mat3(u_model) * a_normal`) y pasarla al fragment; con skinning, transformar la normal con la matriz de hueso.
-8. **Fragment shader**:
-   - `base = (hasTex ? texture(...) : 1.0) * vertexColor * materialColor`
-   - `lit = base * (worldAmbient + max(dot(N, L), 0) * dirAmbient)` usando la luz del mundo.
-   - Niebla por distancia con color de niebla del nivel (o valor original), no negro 10-45 fijo.
-9. Añadir uniforms: `u_world_ambient`, `u_dir_ambient`, `u_light_dir`, `u_material_color`, `u_has_tex`.
+8. **Modos de diagnóstico disponibles**: prelit (color de vértice), prelit × color del material y textura sola. No activar iluminación por normales hasta localizar una fuente de luz válida en los assets o en el comportamiento del motor.
+9. No usar `RW_WORLD` como fuente de iluminación. Material ambient/diffuse son coeficientes del material; por sí solos no prueban que el juego aplique iluminación dinámica.
 10. **Fallback sin textura**: `u_has_tex=0` → usar color de material/vértice (elimina el negro).
 
 ### Fase 4 — Transparencia / alpha
@@ -93,14 +81,20 @@ Todo se basa en los datos que ya están en los assets (`scene1.bsp`, `modelspc.d
 
 ```mermaid
 flowchart TD
-    A[scene1.bsp RW_WORLD Struct] --> B[ambient y dirAmbient y lightDir]
-    B --> C[DFFModel world lighting]
-    C --> D[uniforms en native-lib]
-    E[BSP Material Struct] --> F[material color ambient diffuse]
-    F --> D
-    G[DFFVertex position normal uv color] --> H[Vertex Shader]
-    D --> H
-    H --> I[Fragment Shader]
+    A[scene1.bsp RW_WORLD Struct 64 bytes] --> B[conteos y bounding box]
+    B --> C[validación de geometría]
+    E[BSP Material Struct] --> F[color ambient diffuse]
+    G[DFFVertex color y UV] --> H[Vertex Shader]
+    F --> I[Modos de diagnóstico]
+    H --> I
     J[TXD textures] --> I
-    I --> K[Geometria iluminada y con niebla]
+    I --> K[Geometría sin luz de mundo inventada]
 ```
+
+
+## Verificación de materiales y luces: estado actual
+
+- **Verificado en el código:** el parser de materiales BSP y DFF lee RGBA, `ambient`, `specular` y `diffuse` desde el struct RenderWare de material. El renderizador envía color, ambient y diffuse como uniforms, pero los coeficientes ambient/diffuse no estaban aplicándose en la ecuación del fragment shader; el shader anterior multiplicaba colores y, en los modos 1–3, utilizaba el supuesto `RW_WORLD` como luz.
+- **No verificado con valores de assets:** no se inspeccionó aquí la tabla completa de materiales de `scene1.bsp` ni de `cash_pc.dff`; por lo tanto, no afirmo qué valores ambient/diffuse tienen sus materiales.
+- **Luces dinámicas sobre Cash:** el código de port visible no contiene una fuente de luz de mundo válida derivada de `RW_WORLD`, ni una implementación confirmada de luces dinámicas por personaje. Eso no demuestra que el juego original no las use. Para confirmarlo hacen falta datos del DFF/otros chunks de luz o una inspección del ejecutable/comportamiento original.
+- **Pendiente:** extraer y registrar los materiales reales de `cash_pc.dff` y `scene1.bsp`, localizar chunks/entidades de luces y comparar capturas del juego original con las tres vistas de diagnóstico.
