@@ -115,19 +115,40 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
 
     // El segundo hijo de RW_WORLD es RW_MATERIAL_LIST
     ChunkHeader ml_hdr = r.read_chunk();
+    if (r.failed || r.pos > root_end || ml_hdr.size > root_end - r.pos ||
+        !r.can_read(ml_hdr.size)) {
+        LOGE("BSP: material list truncada");
+        return DFFModel{};
+    }
     if (ml_hdr.type == 0x0008) {
         size_t ml_end = r.pos + ml_hdr.size;
         ChunkHeader ml_struct = r.read_chunk();
+        if (r.failed || ml_struct.size < sizeof(uint32_t) ||
+            r.pos > ml_end || ml_struct.size > ml_end - r.pos ||
+            !r.can_read(ml_struct.size)) {
+            LOGE("BSP: struct de material list truncado");
+            return DFFModel{};
+        }
         uint32_t numMaterials = r.read<uint32_t>();
-        r.skip(ml_struct.size - 4);
+        r.skip(ml_struct.size - sizeof(uint32_t));
         
         model.material_textures.resize(numMaterials);
         for (uint32_t i = 0; i < numMaterials && r.pos < ml_end; i++) {
             ChunkHeader mat_hdr = r.read_chunk();
+            if (r.failed || r.pos > ml_end || mat_hdr.size > ml_end - r.pos ||
+                !r.can_read(mat_hdr.size)) {
+                LOGE("BSP: material %u truncado", i);
+                return DFFModel{};
+            }
             if (mat_hdr.type != 0x0007) { r.skip(mat_hdr.size); continue; }
             size_t mat_end = r.pos + mat_hdr.size;
             model.materials.resize(numMaterials);
             ChunkHeader mat_struct = r.read_chunk();
+            if (r.failed || r.pos > mat_end || mat_struct.size > mat_end - r.pos ||
+                !r.can_read(mat_struct.size)) {
+                LOGE("BSP: struct de material %u truncado", i);
+                return DFFModel{};
+            }
             if (mat_struct.size >= 28) {
                 r.read<uint32_t>(); // flags
                 uint8_t r_c = r.read<uint8_t>();
@@ -149,6 +170,11 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
             }
             while (r.pos < mat_end) {
                 ChunkHeader th = r.read_chunk();
+                if (r.failed || r.pos > mat_end || th.size > mat_end - r.pos ||
+                    !r.can_read(th.size)) {
+                    LOGE("BSP: textura de material truncada");
+                    return DFFModel{};
+                }
                 if (th.type == 0x0006) { // Texture
                     size_t tex_end = r.pos + th.size;
                     ChunkHeader ts = r.read_chunk();
