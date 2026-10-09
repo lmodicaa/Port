@@ -1292,14 +1292,28 @@ static void load_asylum_environment() {
             if (it != world->second.end()) { wanted_local_weather = ini_key(it->second); break; }
         }
     }
-    if (!wanted_local_weather.empty()) local_weather = setup.find(wanted_local_weather);
+    auto record_is_avoided = [](const std::map<std::string, std::string>& fields) {
+        const auto it = fields.find("AVOID");
+        if (it == fields.end()) return false;
+        const std::string value = ini_key(it->second);
+        return value.empty() || (value != "0" && value != "FALSE" &&
+                                 value != "NO" && value != "OFF");
+    };
+    if (!wanted_local_weather.empty()) {
+        local_weather = setup.find(wanted_local_weather);
+        if (local_weather != setup.end() && record_is_avoided(local_weather->second)) {
+            LOGI("ENV local climate: referencia '%s' ignorada porque está marcada AVOID",
+                 wanted_local_weather.c_str());
+            local_weather = setup.end();
+        }
+    }
     local_weather_ref_resolved = local_weather != setup.end() && !wanted_local_weather.empty();
     if (local_weather == setup.end()) {
         for (const auto& name : setup_order) {
+            if (name == "WORLD1") continue;
             const auto it = setup.find(name);
-            if (it != setup.end() &&
-                (it->second.count("SKY") || it->second.count("FOGSTART") ||
-                 it->second.count("FARCLIP") || it->second.count("FAR_CLIP"))) {
+            if (it == setup.end() || record_is_avoided(it->second)) continue;
+            if (it->second.count("SKY") || it->second.count("FOGSTART")) {
                 local_weather = it;
                 break;
             }
