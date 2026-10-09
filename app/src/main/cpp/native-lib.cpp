@@ -1285,6 +1285,7 @@ static void load_asylum_environment() {
     // (CLOUDY, WINDY, etc.). Tienen prioridad sobre WEATHER.INI global.
     auto local_weather = setup.end();
     std::string wanted_local_weather;
+    bool local_weather_ref_resolved = false;
     if (world != setup.end()) {
         for (const char* key : {"WEATHER", "WEATHER_TYPE", "WEATHER_ID"}) {
             auto it = world->second.find(key);
@@ -1292,6 +1293,7 @@ static void load_asylum_environment() {
         }
     }
     if (!wanted_local_weather.empty()) local_weather = setup.find(wanted_local_weather);
+    local_weather_ref_resolved = local_weather != setup.end() && !wanted_local_weather.empty();
     if (local_weather == setup.end()) {
         for (const auto& name : setup_order) {
             const auto it = setup.find(name);
@@ -1334,8 +1336,9 @@ static void load_asylum_environment() {
                 far_clip_source = "levelSetup.ini:" + local_weather->first;
             }
         }
-        LOGI("ENV local climate: record='%s' SKY=%s FOGSTART=%s FARCLIP=%s",
+        LOGI("ENV local climate: record='%s' selection=%s SKY=%s FOGSTART=%s FARCLIP=%s",
              local_weather->first.c_str(),
+             local_weather_ref_resolved ? "world1-reference" : "file-order-first-match-unverified",
              sky_from_local_setup ? "loaded" : "missing/invalid",
              fog_start_from_local_setup ? "loaded" : "missing/invalid",
              far_clip_from_local_setup ? "loaded" : "missing/invalid");
