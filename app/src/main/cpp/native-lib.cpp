@@ -28,6 +28,7 @@
 #include "collision_runtime.h"
 #include "level_runtime.h"
 #include "render_runtime.h"
+#include "player_runtime.h"
 
 #define LOG_TAG "Manhunt"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
@@ -420,43 +421,6 @@ static std::vector<EntityInst> g_insts;
 // resource name to equal the render model name.
 static std::map<std::string, std::string> g_entity_collision_data;
 
-struct PlayerControlConfig {
-    float stick_dead_zone = 0.35f;
-    float move_walk_threshold = 0.53f;
-    float move_run_threshold = 0.96f;
-    float move_transition_speed = 0.20f;
-
-    float sneak_walk_speed = 1.20f;
-    float sneak_run_speed = 1.00f;
-    float walk_speed = 1.00f;
-    float run_speed = 1.00f;
-    float sprint_speed = 1.00f;
-    float crouch_forward_speed = 1.30f;
-    float crouch_backward_speed = 0.90f;
-    float crouch_sideways_speed = 1.20f;
-
-    float aim_axis_width = 10.0f;
-    float move_axis_width = 10.0f;
-    float cam_position[3] = {0.1f, 0.0f, -0.1f};
-    float cam_recentre_speed = 1700.0f;
-    float cam_stair_speed = 500.0f;
-    float aim_zones[10] = {3.0f, 8.0f, 12.0f, 18.0f, 25.0f, 35.0f, 45.0f, 57.0f, 76.0f, 125.0f};
-    float vertical_aim_limit = 9.30f;
-    float turn_pause = 0.27f;
-    float turn_acceleration = 4.0f;
-    float extra_turn_speed = 50.0f;
-    float max_quick_turn_speed = 60.0f;
-    float run_threshold = 0.95f;
-
-    // Player stamina from Manhunt EntityTypeData.ini.
-    float stamina_total_sprint_time = 20.0f;
-    float stamina_no_sprint_time = 3.0f;
-    float stamina_recovery_moving = 54.0f;
-    float stamina_recovery_running = 80.0f;
-    float stamina_recovery_still = 22.0f;
-    float stamina_recovery_pause = 0.0f;
-};
-
 static PlayerControlConfig g_player_control;
 static float g_stamina_remaining = 20.0f;
 static float g_stamina_recovery_delay = 0.0f;
@@ -472,44 +436,9 @@ static bool sprint_is_active() {
 }
 
 static void update_player_stamina(float dt, bool moving) {
-    if (dt <= 0.0f) return;
-
-    const float total =
-        std::max(0.001f, g_player_control.stamina_total_sprint_time);
-
-    if (g_sprint_active && moving &&
-        g_stamina_remaining > 0.0f) {
-        g_stamina_remaining =
-            std::max(0.0f, g_stamina_remaining - dt);
-        g_stamina_recovery_delay =
-            std::max(0.0f, g_player_control.stamina_recovery_pause);
-
-        if (g_stamina_remaining <= 0.0f) {
-            g_sprint_active = false;
-        }
-        return;
-    }
-
-    if (g_stamina_recovery_delay > 0.0f) {
-        g_stamina_recovery_delay =
-            std::max(0.0f, g_stamina_recovery_delay - dt);
-        return;
-    }
-
-    if (g_stamina_remaining >= total) {
-        g_stamina_remaining = total;
-        return;
-    }
-
-    const float recovery_seconds = moving
-        ? g_player_control.stamina_recovery_moving
-        : g_player_control.stamina_recovery_still;
-
-    const float recovery =
-        total / std::max(0.001f, recovery_seconds);
-
-    g_stamina_remaining =
-        std::min(total, g_stamina_remaining + recovery * dt);
+    player_update_stamina(dt, moving, g_player_control,
+                          g_stamina_remaining, g_stamina_recovery_delay,
+                          g_sprint_active);
 }
 
 static const Animation* find_animation_ci(const char* wanted) {
@@ -4390,33 +4319,6 @@ static double aim_time_seconds() {
            static_cast<double>(ts.tv_nsec) * 1.0e-9;
 }
 
-static float aim_zone_speed(float stick_distance, bool vertical) {
-    const float dead = std::max(0.001f, g_player_control.stick_dead_zone);
-    float d = (stick_distance - dead) / std::max(0.001f, 1.0f - dead);
-    d = std::max(0.0f, std::min(1.0f, d));
-
-    float zone_pos = d * 10.0f;
-
-    if (vertical) {
-        zone_pos = std::min(zone_pos, g_player_control.vertical_aim_limit);
-    }
-    if (zone_pos <= 0.0f) return 0.0f;
-    if (zone_pos >= 10.0f) return g_player_control.aim_zones[9];
-
-    const float exact = zone_pos - 1.0f;
-    const int lo = std::max(0, std::min(8, static_cast<int>(std::floor(exact))));
-    const float t = exact - static_cast<float>(lo);
-    return g_player_control.aim_zones[lo] * (1.0f - t) +
-           g_player_control.aim_zones[lo + 1] * t;
-}
-
-static float snap_aim_angle(float angle) {
-    const float width = g_player_control.aim_axis_width * 3.14159265359f / 180.0f;
-    const float step = 3.14159265359f / 4.0f;
-    const float nearest = std::round(angle / step) * step;
-    const float delta = atan2f(sinf(angle - nearest), cosf(angle - nearest));
-    return fabsf(delta) <= width ? nearest : angle;
-}
 
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeSetTouchSensitivity(JNIEnv*, jobject, jfloat percent) {
@@ -4454,17 +4356,17 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
 
     if (!touch_mode) {
         const float angle = atan2f(x, -y);
-        const float snapped = snap_aim_angle(angle);
+        const float snapped = player_snap_aim_angle(angle, g_player_control);
         x = sinf(snapped);
         y = -cosf(snapped);
     }
 
     const float touch_multiplier = touch_mode ? g_touch_sensitivity : 1.0f;
     const float horizontal_speed =
-        aim_zone_speed(distance, false) *
+        player_aim_zone_speed(distance, false, g_player_control) *
         touch_multiplier;
     const float vertical_speed =
-        aim_zone_speed(distance, true) *
+        player_aim_zone_speed(distance, true, g_player_control) *
         touch_multiplier;
 
     float yaw_speed = horizontal_speed;
