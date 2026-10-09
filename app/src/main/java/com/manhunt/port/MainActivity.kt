@@ -140,8 +140,8 @@ class MainActivity : Activity() {
         val container = findViewById<android.widget.FrameLayout>(R.id.main_container)
         container.addView(glView, 0)
 
-        // Debug de iluminación: comparar variantes en una sola sesión.
-        val lightingLabels = arrayOf("Luz: sin luz", "Luz: mundo", "Luz: ambient", "Luz: dirAmbient")
+        // Vistas de diagnóstico de color; no representan luces del motor original.
+        val lightingLabels = arrayOf("Debug: prelit", "Debug: prelit × material", "Debug: textura sola")
         var lightingMode = 0
         renderer.nativeSetLightingDebugMode(lightingMode)
         val lightingButton = Button(this).apply {
