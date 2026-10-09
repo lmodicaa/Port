@@ -3406,7 +3406,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     if (!g_program || !g_vao || g_groups.empty()) return;
 
     float aspect = g_height > 0 ? (float)g_width / (float)g_height : 1.f;
-    Mat4 proj = mat4_perspective(1.22f, aspect, 0.1f, 800.f);
+    Mat4 proj = mat4_perspective(1.22f, aspect, g_near_clip, g_far_clip);
     Mat4 view = mat4_look_at(cam_pos, target, {0.f, 1.f, 0.f});
     Mat4 model_m = mat4_identity();
     Mat4 mvp = mat4_mul(mat4_mul(proj, view), model_m);
@@ -3424,7 +3424,15 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     GLint loc_prelit_gamma = glGetUniformLocation(g_program, "u_prelit_gamma");
     GLint loc_cash_ambient = glGetUniformLocation(g_program, "u_cash_ambient");
     GLint loc_cash_directional = glGetUniformLocation(g_program, "u_cash_directional");
+    GLint loc_fog_color = glGetUniformLocation(g_program, "u_fog_color");
+    GLint loc_fog_start = glGetUniformLocation(g_program, "u_fog_start");
+    GLint loc_fog_end = glGetUniformLocation(g_program, "u_fog_end");
+    GLint loc_fog_enabled = glGetUniformLocation(g_program, "u_fog_enabled");
 
+    glUniform4fv(loc_fog_color, 1, g_fog_color);
+    glUniform1f(loc_fog_start, g_fog_start);
+    glUniform1f(loc_fog_end, g_far_clip);
+    glUniform1i(loc_fog_enabled, g_linear_fog_enabled ? 1 : 0);
     glUniform1i(glGetUniformLocation(g_program, "u_lighting_debug_mode"), g_lighting_debug_mode.load(std::memory_order_relaxed));
     glUniform1f(loc_prelit_multiplier, g_prelit_multiplier.load(std::memory_order_relaxed));
     glUniform1f(loc_prelit_gamma, g_prelit_gamma.load(std::memory_order_relaxed));
