@@ -98,3 +98,11 @@ flowchart TD
 - **No verificado con valores de assets:** no se inspeccionó aquí la tabla completa de materiales de `scene1.bsp` ni de `cash_pc.dff`; por lo tanto, no afirmo qué valores ambient/diffuse tienen sus materiales.
 - **Luces dinámicas sobre Cash:** el código de port visible no contiene una fuente de luz de mundo válida derivada de `RW_WORLD`, ni una implementación confirmada de luces dinámicas por personaje. Eso no demuestra que el juego original no las use. Para confirmarlo hacen falta datos del DFF/otros chunks de luz o una inspección del ejecutable/comportamiento original.
 - **Pendiente:** extraer y registrar los materiales reales de `cash_pc.dff` y `scene1.bsp`, localizar chunks/entidades de luces y comparar capturas del juego original con las tres vistas de diagnóstico.
+
+
+## Diagnóstico de prelit y luz experimental (no referencia final)
+
+- El modo `prelit boosted` permite ajustar multiplicador y gamma en pantalla; cada cambio se registra en Logcat como `RENDER DEBUG VALUES`.
+- El modo `EXPERIMENTAL: luz Cash` aplica a Cash una suma simple de ambiente + direccional basada en la normal. Los controles de ambiente e intensidad direccional son exploratorios y no representan parámetros medidos del juego original.
+- No hay un multiplicador/gamma "correcto" fijado: hace falta una captura de referencia del juego PC, idealmente con cámara, exposición, nivel y pose comparables.
+- `MaterialData.texture` se rellena con el nombre leído del chunk Texture en los parsers BSP y DFF; queda vacío si el material no contiene nombre de textura.
