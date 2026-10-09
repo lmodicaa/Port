@@ -8,6 +8,7 @@ add_library(manhunt SHARED
         math3d.cpp
         animation_runtime.cpp
         collision_runtime.cpp
+        level_runtime.cpp
         txd_loader.cpp
         dff_loader.cpp
         bsp_loader.cpp
