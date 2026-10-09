@@ -1169,7 +1169,8 @@ static std::vector<float> parse_ini_numbers(const std::string& value) {
 }
 
 static std::map<std::string, std::map<std::string, std::string>> parse_ini_records(
-    const std::vector<uint8_t>& bytes) {
+    const std::vector<uint8_t>& bytes,
+    std::vector<std::string>* record_order = nullptr) {
     std::map<std::string, std::map<std::string, std::string>> records;
     if (bytes.empty()) return records;
     std::istringstream input(std::string(bytes.begin(), bytes.end()));
@@ -1186,6 +1187,9 @@ static std::map<std::string, std::map<std::string, std::string>> parse_ini_recor
             std::string name;
             parts >> name;
             current_record = ini_key(name);
+            if (records.find(current_record) == records.end() && record_order) {
+                record_order->push_back(current_record);
+            }
             records[current_record];
             continue;
         }
@@ -1238,7 +1242,8 @@ static void load_asylum_environment() {
     // containing SKY and FOGSTART and log that this selection is unverified.
     auto weather_bytes = read_asset("levels/asylum/WEATHER.INI");
     if (weather_bytes.empty()) weather_bytes = read_asset("levels/asylum/weather.ini");
-    const auto weather = parse_ini_records(weather_bytes);
+    std::vector<std::string> weather_order;
+    const auto weather = parse_ini_records(weather_bytes, &weather_order);
     std::string wanted_weather;
     if (world != setup.end()) {
         for (const char* key : {"WEATHER", "WEATHER_TYPE", "WEATHER_ID"}) {
@@ -1249,8 +1254,18 @@ static void load_asylum_environment() {
     auto selected = weather.end();
     if (!wanted_weather.empty()) selected = weather.find(wanted_weather);
     if (selected == weather.end()) {
-        for (auto it = weather.begin(); it != weather.end(); ++it) {
-            if (it->second.count("SKY") || it->second.count("FOGSTART")) {
+        for (const auto& name : weather_order) {
+            const auto it = weather.find(name);
+            if (it != weather.end() && it->second.count("SKY") && it->second.count("FOGSTART")) {
+                selected = it;
+                break;
+            }
+        }
+    }
+    if (selected == weather.end()) {
+        for (const auto& name : weather_order) {
+            const auto it = weather.find(name);
+            if (it != weather.end() && (it->second.count("SKY") || it->second.count("FOGSTART"))) {
                 selected = it;
                 break;
             }
@@ -1264,14 +1279,32 @@ static void load_asylum_environment() {
                 for (int i = 0; i < 3; ++i) g_sky_color[i] = std::clamp(rgb[i] / 255.0f, 0.0f, 1.0f);
             }
         }
-        const auto fog_start = selected->second.find("FOGSTART");
+        auto fog_start = selected->second.find("FOGSTART");
+        std::string fog_start_record = selected->first;
+        if (fog_start == selected->second.end()) {
+            for (const auto& name : weather_order) {
+                const auto it = weather.find(name);
+                if (it != weather.end() && it->second.count("FOGSTART")) {
+                    fog_start = it->second.find("FOGSTART");
+                    fog_start_record = name;
+                    break;
+                }
+            }
+        }
         if (fog_start != selected->second.end()) {
             const auto values = parse_ini_numbers(fog_start->second);
             if (!values.empty() && values[0] >= 0.0f) g_fog_start = values[0];
+        } else if (fog_start_record != selected->first) {
+            const auto record_it = weather.find(fog_start_record);
+            if (record_it != weather.end()) {
+                const auto values = parse_ini_numbers(record_it->second.at("FOGSTART"));
+                if (!values.empty() && values[0] >= 0.0f) g_fog_start = values[0];
+            }
         }
-        LOGI("ENV weather: record='%s' selection=%s SKY=(%.2f,%.2f,%.2f)/255 FOGSTART=%.3f",
-             selected->first.c_str(), wanted_weather.empty() ? "first-match-unverified" : "world1-reference",
-             g_sky_color[0] * 255.0f, g_sky_color[1] * 255.0f, g_sky_color[2] * 255.0f, g_fog_start);
+        LOGI("ENV weather: record='%s' selection=%s SKY=(%.2f,%.2f,%.2f)/255 FOGSTART=%.3f source_record='%s'",
+             selected->first.c_str(), wanted_weather.empty() ? "file-order-first-match-unverified" : "world1-reference",
+             g_sky_color[0] * 255.0f, g_sky_color[1] * 255.0f, g_sky_color[2] * 255.0f,
+             g_fog_start, fog_start_record.c_str());
     } else {
         LOGE("ENV: no se encontró WEATHER.INI con SKY/FOGSTART; cielo=fog color y FOGSTART de respaldo=%.3f", g_fog_start);
         for (int i = 0; i < 3; ++i) g_sky_color[i] = g_fog_color[i];
