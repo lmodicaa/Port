@@ -43,7 +43,13 @@ std::vector<uint8_t> level_read_asset(
         return {};
     }
 
-    const size_t size = static_cast<size_t>(AAsset_getLength(asset));
+    const off_t asset_length = AAsset_getLength(asset);
+    if (asset_length < 0) {
+        LEVEL_LOGE("Longitud de asset inválida: %s", path);
+        AAsset_close(asset);
+        return {};
+    }
+    const size_t size = static_cast<size_t>(asset_length);
     std::vector<uint8_t> buffer(size);
     const int bytes_read = AAsset_read(asset, buffer.data(), size);
     AAsset_close(asset);
