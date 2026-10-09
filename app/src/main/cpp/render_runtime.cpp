@@ -56,8 +56,6 @@ uniform int u_has_tex;
 uniform int u_lighting_debug_mode;
 
 uniform vec4 u_mat_color;
-uniform float u_mat_ambient;
-uniform float u_mat_diffuse;
 
 out vec4 frag_color;
 
