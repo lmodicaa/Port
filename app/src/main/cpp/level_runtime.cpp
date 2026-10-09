@@ -39,7 +39,6 @@ std::vector<uint8_t> level_read_asset(
     if (!assets) return {};
     AAsset* asset = AAssetManager_open(assets, path, AASSET_MODE_BUFFER);
     if (!asset) {
-        LEVEL_LOGE("Asset no encontrado: %s", path);
         return {};
     }
 
