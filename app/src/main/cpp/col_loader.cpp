@@ -23,6 +23,10 @@ public:
         return pos_;
     }
 
+    size_t remaining() const {
+        return pos_ <= size_ ? size_ - pos_ : 0;
+    }
+
     bool skip(size_t count) {
         if (!can_read(count)) return false;
         pos_ += count;
@@ -121,8 +125,9 @@ std::vector<ColModel> col_load_all(const uint8_t* data, size_t size) {
 
         int32_t count = 0;
 
-        if (!r.read(count) || !valid_count(count)) {
-            LOGE("COL[%d] %s: sphere count inválido", model_index, model.name.c_str());
+        if (!r.read(count) || !valid_count(count) ||
+            static_cast<size_t>(count) > r.remaining() / 20u) {
+            LOGE("COL[%d] %s: sphere count inválido o fuera de límites", model_index, model.name.c_str());
             break;
         }
         model.spheres.reserve(static_cast<size_t>(count));
@@ -137,8 +142,9 @@ std::vector<ColModel> col_load_all(const uint8_t* data, size_t size) {
             model.spheres.push_back(sphere);
         }
 
-        if (!r.read(count) || !valid_count(count)) {
-            LOGE("COL[%d] %s: line count inválido", model_index, model.name.c_str());
+        if (!r.read(count) || !valid_count(count) ||
+            static_cast<size_t>(count) > r.remaining() / 24u) {
+            LOGE("COL[%d] %s: line count inválido o fuera de límites", model_index, model.name.c_str());
             break;
         }
         model.lines.reserve(static_cast<size_t>(count));
@@ -151,8 +157,9 @@ std::vector<ColModel> col_load_all(const uint8_t* data, size_t size) {
             model.lines.push_back(line);
         }
 
-        if (!r.read(count) || !valid_count(count)) {
-            LOGE("COL[%d] %s: box count inválido", model_index, model.name.c_str());
+        if (!r.read(count) || !valid_count(count) ||
+            static_cast<size_t>(count) > r.remaining() / 28u) {
+            LOGE("COL[%d] %s: box count inválido o fuera de límites", model_index, model.name.c_str());
             break;
         }
         model.boxes.reserve(static_cast<size_t>(count));
@@ -167,8 +174,9 @@ std::vector<ColModel> col_load_all(const uint8_t* data, size_t size) {
             model.boxes.push_back(box);
         }
 
-        if (!r.read(count) || !valid_count(count)) {
-            LOGE("COL[%d] %s: vertex count inválido", model_index, model.name.c_str());
+        if (!r.read(count) || !valid_count(count) ||
+            static_cast<size_t>(count) > r.remaining() / 12u) {
+            LOGE("COL[%d] %s: vertex count inválido o fuera de límites", model_index, model.name.c_str());
             break;
         }
         model.vertices.reserve(static_cast<size_t>(count));
@@ -181,8 +189,9 @@ std::vector<ColModel> col_load_all(const uint8_t* data, size_t size) {
             model.vertices.push_back(v);
         }
 
-        if (!r.read(count) || !valid_count(count)) {
-            LOGE("COL[%d] %s: face count inválido", model_index, model.name.c_str());
+        if (!r.read(count) || !valid_count(count) ||
+            static_cast<size_t>(count) > r.remaining() / 6u) {
+            LOGE("COL[%d] %s: face count inválido o fuera de límites", model_index, model.name.c_str());
             break;
         }
         model.faces.reserve(static_cast<size_t>(count));
