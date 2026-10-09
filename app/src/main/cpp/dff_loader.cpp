@@ -299,17 +299,38 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
         
         // El primer chunk de Geometry es el Struct con la info principal
         ChunkHeader sh = r.read_chunk();
+        if (r.failed || r.pos > geom_end || sh.size > geom_end - r.pos ||
+            !r.can_read(sh.size)) {
+            LOGE("DFF: struct de Geometry truncado");
+            return DFFModel{};
+        }
         if (sh.type != RW_STRUCT) {
             LOGE("Geometry sin Struct interno, skipeando");
             r.pos = geom_end;
             continue;
         }
-        
+        if (sh.size < 4u * sizeof(uint32_t)) {
+            LOGE("DFF: struct de Geometry demasiado pequeño (%u bytes)", sh.size);
+            return DFFModel{};
+        }
+
         uint32_t format = r.read<uint32_t>();
         uint32_t numTriangles = r.read<uint32_t>();
         uint32_t numVertices = r.read<uint32_t>();
         uint32_t numMorphTargets = r.read<uint32_t>();
-        
+        if (r.failed || r.pos > geom_end) {
+            LOGE("DFF: cabecera de Geometry truncada");
+            return DFFModel{};
+        }
+        const size_t geometry_remaining = geom_end - r.pos;
+        if (numTriangles > geometry_remaining / 8u ||
+            numVertices > geometry_remaining / 12u ||
+            numMorphTargets > geometry_remaining / 24u) {
+            LOGE("DFF: conteos fuera de límites (tris=%u verts=%u morph=%u, restantes=%zu)",
+                 numTriangles, numVertices, numMorphTargets, geometry_remaining);
+            return DFFModel{};
+        }
+
         LOGI("Geometry: %d tris, %d verts, format 0x%X", numTriangles, numVertices, format);
         
         // Banderas (flags) del formato
@@ -318,20 +339,43 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
         bool has_norms  = (format & 0x10) != 0;
         
         // Omitimos los pre-lit colors si existen (RGBA)
-        std::vector<uint8_t> colors(numVertices * 4, 255);
+        const size_t color_bytes = static_cast<size_t>(numVertices) * 4u;
+        if (color_bytes > geom_end - r.pos) {
+            LOGE("DFF: colores fuera de límites del Geometry");
+            return DFFModel{};
+        }
+        std::vector<uint8_t> colors(color_bytes, 255);
         if (has_colors) {
-            if (r.can_read(numVertices * 4)) memcpy(colors.data(), r.base + r.pos, numVertices * 4);
-            r.skip(numVertices * 4);
+            if (!r.can_read(color_bytes)) {
+                LOGE("DFF: colores truncados");
+                return DFFModel{};
+            }
+            memcpy(colors.data(), r.base + r.pos, color_bytes);
+            if (!r.skip(color_bytes)) return DFFModel{};
         }
         
         // Leemos los UVs (TexCoords)
         int num_uv_sets = (format & 0x00FF0000) >> 16;
         if (num_uv_sets == 0) num_uv_sets = has_tex ? 1 : 0;
         
-        std::vector<float> uvs(numVertices * 2, 0.0f);
-        if (num_uv_sets > 0 && r.can_read(numVertices * 8)) {
-            memcpy(uvs.data(), r.base + r.pos, numVertices * 8);
-            r.skip(numVertices * 8 * num_uv_sets);
+        const size_t uv_set_bytes = static_cast<size_t>(numVertices) * 8u;
+        if (num_uv_sets > 0 &&
+            (uv_set_bytes > static_cast<size_t>(-1) / static_cast<size_t>(num_uv_sets) ||
+             uv_set_bytes * static_cast<size_t>(num_uv_sets) > geom_end - r.pos)) {
+            LOGE("DFF: UVs fuera de límites del Geometry");
+            return DFFModel{};
+        }
+        std::vector<float> uvs(static_cast<size_t>(numVertices) * 2u, 0.0f);
+        if (num_uv_sets > 0) {
+            if (!r.can_read(uv_set_bytes)) {
+                LOGE("DFF: primer set UV truncado");
+                return DFFModel{};
+            }
+            memcpy(uvs.data(), r.base + r.pos, uv_set_bytes);
+            if (!r.skip(uv_set_bytes * static_cast<size_t>(num_uv_sets))) {
+                LOGE("DFF: sets UV truncados");
+                return DFFModel{};
+            }
         }
         
         // Leemos los triángulos (4 uint16_t por cara: v2, v1, materialId, v3)
