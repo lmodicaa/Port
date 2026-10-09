@@ -125,7 +125,7 @@ flowchart TD
 
 ### Análisis de brillo x1 / x2 / x3 después del cielo/niebla
 
-- En la inspección previa de los vértices BSP, la media de color era aproximadamente 32/255 por canal (estadística agregada previa, no una captura renderizada). Sin clipping, los multiplicadores darían como estimación lineal de entrada: x1 ≈ 32/255 = 0.125; x2 ≈ 64/255 = 0.251; x3 ≈ 96/255 = 0.376. No es posible inferir la media real tras multiplicación solo a partir de la media original porque los canales que superan 255 se saturan.
+- En la inspección previa de los vértices BSP, la media agregada del color de vértice era aproximadamente 32/255 (estadística agregada previa, no una captura renderizada ni una media separada por canal). Sin clipping, los multiplicadores darían como estimación lineal de entrada: x1 ≈ 32/255 = 0.125; x2 ≈ 64/255 = 0.251; x3 ≈ 96/255 = 0.376. No es posible inferir la media real tras multiplicación solo a partir de la media original porque los componentes que superan 255 se saturan.
 - Con `FOG_COLOUR=(6,6,6)`, la mezcla lineal acerca las superficies a 6/255 (≈0.0235 por canal) al alcanzar 120 unidades; con `FOGSTART=30`, la mezcla comienza allí y llega a la niebla en FAR_CLIP. El color SKY 10–12/255 (≈0.039–0.047) afecta al fondo despejado, no reemplaza el color de niebla.
 - Esta estimación describe la matemática del shader, no el brillo percibido final. No se midió una captura renderizada x1/x2/x3 tras estos cambios ni se comparó con una captura PC bajo la misma cámara/exposición.
 
