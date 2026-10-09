@@ -2009,6 +2009,7 @@ static void load_txd_to_gpu(const char* path) {
         return;
     }
     std::vector<TXDTexture> textures = txd_load_all(txd_raw.data(), txd_raw.size());
+    size_t uploaded_textures = 0;
     for (const auto& tex : textures) {
         GLuint t_id;
         glGenTextures(1, &t_id);
@@ -2067,8 +2068,9 @@ static void load_txd_to_gpu(const char* path) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, address_mode(tex.address_u));
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, address_mode(tex.address_v));
         g_tex_map[to_lower(tex.name)] = t_id;
-        LOGI("Cargada textura GPU: %s (%dx%d)", tex.name.c_str(), tex.width, tex.height);
+        ++uploaded_textures;
     }
+    LOGI("TXD GPU cargado: %s (%zu texturas)", path, uploaded_textures);
 }
 
 // ── Setup de Modelo ───────────────────────────────────────────────────────────
