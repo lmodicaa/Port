@@ -2,6 +2,7 @@
 #include <cstring>
 #include <android/log.h>
 #include <algorithm>
+#include <utility>
 
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "ManhuntInst", __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "ManhuntInst", __VA_ARGS__)
@@ -25,7 +26,9 @@ std::vector<EntityInst> parse_inst(const std::vector<uint8_t>& data) {
 
     std::vector<uint32_t> sizes(count);
     const size_t directory_bytes = static_cast<size_t>(count) * sizeof(uint32_t);
-    std::memcpy(sizes.data(), data.data() + sizeof(uint32_t), directory_bytes);
+    if (directory_bytes != 0) {
+        std::memcpy(sizes.data(), data.data() + sizeof(uint32_t), directory_bytes);
+    }
 
     size_t offset = sizeof(uint32_t) + directory_bytes;
     for (uint32_t i = 0; i < count; ++i) {
