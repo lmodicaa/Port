@@ -27,9 +27,7 @@
 
 #define LOG_TAG "Manhunt"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOGa[3] + w1 * bw;
-}
-
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 static bool sample_animation_bone(
     const Animation* anim,
