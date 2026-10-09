@@ -4452,11 +4452,11 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
 // Ciclo: automático -> bind pose -> animación 0 -> ... -> bind pose.
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeSetLightingDebugMode(JNIEnv*, jobject, jint mode) {
-    const int selected = std::max(0, std::min(4, static_cast<int>(mode)));
+    const int selected = std::max(0, std::min(5, static_cast<int>(mode)));
     g_lighting_debug_mode.store(selected, std::memory_order_relaxed);
     static const char* names[] = {
         "prelit", "prelit_material", "texture_only", "prelit_boosted",
-        "EXPERIMENTAL_cash_ambient_directional"
+        "EXPERIMENTAL_cash_ambient_directional", "texture_times_prelit"
     };
     LOGI("RENDER DEBUG MODE: %s (%d); prelit_multiplier=%.2f gamma=%.2f cash_ambient=%.2f cash_directional=%.2f",
          names[selected], selected,
@@ -4464,6 +4464,17 @@ Java_com_manhunt_port_ManhuntRenderer_nativeSetLightingDebugMode(JNIEnv*, jobjec
          g_prelit_gamma.load(std::memory_order_relaxed),
          g_cash_ambient.load(std::memory_order_relaxed),
          g_cash_directional.load(std::memory_order_relaxed));
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_manhunt_port_ManhuntRenderer_nativeGetRenderDebugValue(JNIEnv*, jobject, jint setting) {
+    switch (setting) {
+        case 0: return g_prelit_multiplier.load(std::memory_order_relaxed);
+        case 1: return g_prelit_gamma.load(std::memory_order_relaxed);
+        case 2: return g_cash_ambient.load(std::memory_order_relaxed);
+        case 3: return g_cash_directional.load(std::memory_order_relaxed);
+        default: return 0.0f;
+    }
 }
 
 JNIEXPORT void JNICALL
