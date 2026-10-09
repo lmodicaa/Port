@@ -215,6 +215,11 @@ class MainActivity : Activity() {
         addDebugAdjustment("Gamma", 1)
         addDebugAdjustment("Cash ambiente*", 2)
         addDebugAdjustment("Cash direccional*", 3)
+        debugControls.addView(TextView(this).apply {
+            text = "* Solo modo experimental de Cash; no es la fórmula original."
+            setTextColor(Color.LTGRAY)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
+        })
         val debugControlsParams = FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
