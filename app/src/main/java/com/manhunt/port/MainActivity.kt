@@ -141,21 +141,29 @@ class MainActivity : Activity() {
         val container = findViewById<android.widget.FrameLayout>(R.id.main_container)
         container.addView(glView, 0)
 
-        // Diagnóstico visual. El modo 4 es experimental, no la fórmula original.
+        // Panel de diagnóstico dentro del panel AJUSTE. Las columnas tienen
+        // anchos fijos para evitar solapamientos en landscape.
         val lightingLabels = arrayOf(
             "Debug: prelit",
             "Debug: prelit × material",
             "Debug: textura sola",
             "Debug: prelit boosted",
-            "EXPERIMENTAL: luz Cash"
+            "EXPERIMENTAL: luz Cash",
+            "Debug: textura × prelit"
         )
         var lightingMode = 0
         renderer.nativeSetLightingDebugMode(lightingMode)
+        val density = resources.displayMetrics.density
+        val safeMargin = (18 * density).toInt()
+        val panel = findViewById<LinearLayout>(R.id.cash_calibration_panel)
+        val toggle = findViewById<Button>(R.id.btn_adjust)
+
         val lightingButton = Button(this).apply {
             text = lightingLabels[lightingMode]
             isAllCaps = false
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            setPadding((6 * density).toInt(), 0, (6 * density).toInt(), 0)
             setBackgroundColor(Color.argb(210, 0, 0, 0))
             setOnClickListener {
                 lightingMode = (lightingMode + 1) % lightingLabels.size
@@ -163,53 +171,72 @@ class MainActivity : Activity() {
                 text = lightingLabels[lightingMode]
             }
         }
-        val lightingButtonMargin = (18 * resources.displayMetrics.density).toInt()
         val lightingButtonParams = FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
+            (190 * density).toInt(),
+            (42 * density).toInt(),
             Gravity.TOP or Gravity.END
         )
-        lightingButtonParams.topMargin = lightingButtonMargin
-        lightingButtonParams.marginEnd = lightingButtonMargin
+        lightingButtonParams.topMargin = safeMargin
+        lightingButtonParams.marginEnd = safeMargin
         container.addView(lightingButton, lightingButtonParams)
 
-        // Controles temporales de ajuste: los valores se imprimen en Logcat.
         val debugControls = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(6, 6, 6, 6)
-            setBackgroundColor(Color.argb(185, 0, 0, 0))
+            setPadding((4 * density).toInt(), (4 * density).toInt(),
+                (4 * density).toInt(), (4 * density).toInt())
         }
         fun addDebugAdjustment(label: String, setting: Int) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, (2 * density).toInt())
             }
             val caption = TextView(this).apply {
                 text = label
                 setTextColor(Color.WHITE)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-                minWidth = (78 * resources.displayMetrics.density).toInt()
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                gravity = Gravity.CENTER_VERTICAL
+                maxLines = 1
             }
-            row.addView(caption)
-            fun addStepButton(textValue: String, delta: Int) {
-                val button = Button(this).apply {
-                    text = textValue
-                    isAllCaps = false
-                    setTextColor(Color.WHITE)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-                    setPadding(4, 0, 4, 0)
-                    minWidth = (34 * resources.displayMetrics.density).toInt()
-                    setBackgroundColor(Color.argb(210, 45, 45, 45))
-                    setOnClickListener { renderer.nativeAdjustRenderDebug(setting, delta) }
+            row.addView(caption, LinearLayout.LayoutParams(
+                0, (36 * density).toInt(), 1f
+            ))
+            fun stepButton(symbol: String, direction: Int) = Button(this).apply {
+                text = symbol
+                isAllCaps = false
+                setTextColor(Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setPadding(0, 0, 0, 0)
+                minWidth = 0
+                setBackgroundColor(Color.argb(220, 45, 45, 45))
+                setOnClickListener {
+                    renderer.nativeAdjustRenderDebug(setting, direction)
+                    value.text = "%.2f".format(java.util.Locale.US,
+                        renderer.nativeGetRenderDebugValue(setting))
                 }
-                row.addView(button, LinearLayout.LayoutParams(
-                    (38 * resources.displayMetrics.density).toInt(),
-                    (34 * resources.displayMetrics.density).toInt()
-                ))
             }
-            addStepButton("−", -1)
-            addStepButton("+", 1)
-            debugControls.addView(row)
+            val minus = stepButton("−", -1)
+            row.addView(minus, LinearLayout.LayoutParams(
+                (36 * density).toInt(), (34 * density).toInt()
+            ))
+            val value = TextView(this).apply {
+                text = "%.2f".format(java.util.Locale.US,
+                    renderer.nativeGetRenderDebugValue(setting))
+                setTextColor(Color.WHITE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                gravity = Gravity.CENTER
+                maxLines = 1
+            }
+            row.addView(value, LinearLayout.LayoutParams(
+                (48 * density).toInt(), (34 * density).toInt()
+            ))
+            val plus = stepButton("+", 1)
+            row.addView(plus, LinearLayout.LayoutParams(
+                (36 * density).toInt(), (34 * density).toInt()
+            ))
+            debugControls.addView(row, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
         }
         addDebugAdjustment("Prelit ×", 0)
         addDebugAdjustment("Gamma", 1)
@@ -220,17 +247,34 @@ class MainActivity : Activity() {
             setTextColor(Color.LTGRAY)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
         })
-        val debugControlsParams = FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.START
-        )
-        debugControlsParams.topMargin = lightingButtonMargin
-        debugControlsParams.marginStart = lightingButtonMargin
-        container.addView(debugControls, debugControlsParams)
-        
+        panel.addView(debugControls)
 
-
+        // Mantener AJUSTE fuera del panel y aplicar el margen seguro del notch
+        // a los elementos flotantes sin desplazar la superficie 3D.
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(container) { _, insets ->
+            val cutout = insets.displayCutout
+            val leftSafe = maxOf(safeMargin, cutout?.safeInsetLeft ?: 0)
+            val rightSafe = maxOf(safeMargin, cutout?.safeInsetRight ?: 0)
+            val topSafe = maxOf(safeMargin, cutout?.safeInsetTop ?: 0)
+            (toggle.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                lp.marginStart = leftSafe
+                lp.topMargin = topSafe
+                toggle.layoutParams = lp
+            }
+            (panel.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                lp.marginStart = leftSafe
+                lp.topMargin = topSafe + (toggle.layoutParams.height.takeIf { it > 0 } ?: (54 * density).toInt()) + (8 * density).toInt()
+                lp.width = minOf((340 * density).toInt(),
+                    (container.width - leftSafe - rightSafe).coerceAtLeast((250 * density).toInt()))
+                panel.layoutParams = lp
+            }
+            (lightingButton.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                lp.marginEnd = rightSafe
+                lp.topMargin = topSafe
+                lightingButton.layoutParams = lp
+            }
+            insets
+        }
         val sprintButton = findViewById<android.widget.Button>(R.id.btn_sprint)
         sprintButton.setOnTouchListener { _, event ->
             when (event.actionMasked) {
