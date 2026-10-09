@@ -258,15 +258,7 @@ static void rebuild_debug_animation_list() {
         }
     }
 
-    LOGI("IFP DEBUG: %zu animaciones con tracks", g_debug_anim_list.size());
-    for (size_t i = 0; i < g_debug_anim_list.size(); ++i) {
-        const Animation* anim = g_debug_anim_list[i];
-        LOGI("IFP DEBUG [%zu] %s duration=%.3f tracks=%zu",
-             i,
-             anim->name.c_str(),
-             anim->duration,
-             anim->tracks.size());
-    }
+    LOGI("IFP debug list: %zu animaciones", g_debug_anim_list.size());
 }
 
 static void dump_cash_debug(const DFFModel& model) {
@@ -972,21 +964,6 @@ static void rebuild_col_inst_collisions() {
         const Mat4 transform =
             mat4_from_pos_quat(inst.pos, inst.rot);
         ++matched_instances;
-
-        if (matched_instances <= 40) {
-            LOGI(
-                "COL MATCH[%zu]: entity=%s model=%s class=%s collision=%s faces=%zu boxes=%zu lines=%zu spheres=%zu",
-                matched_instances,
-                inst.name.c_str(),
-                inst.model.c_str(),
-                inst.entity_class.c_str(),
-                col->name.c_str(),
-                col->faces.size(),
-                col->boxes.size(),
-                col->lines.size(),
-                col->spheres.size()
-            );
-        }
 
         for (const auto& face : col->faces) {
             if (face.a >= col->vertices.size() ||
@@ -2174,11 +2151,47 @@ static void setup_model() {
     // TXD
     load_txd_to_gpu("levels/asylum/pak/scene1pc.txd");
     load_txd_to_gpu("levels/asylum/pak/modelspc.txd");
-    load_txd_to_gpu("cash_pc.txd");
+    // Cash files may be exported either at the game root or inside the
+    // level pak. Probe known layouts quietly; report one actionable error.
+    const char* cash_txd_paths[] = {
+        "cash_pc.txd",
+        "levels/asylum/pak/cash_pc.txd",
+        "export/ManHunt#pak/cash_pc.txd",
+        "export/ManHunt#pak/levels/Asylum/pak/cash_pc.txd"
+    };
+    bool cash_txd_loaded = false;
+    for (const char* path : cash_txd_paths) {
+        auto txd_probe = read_asset(path);
+        if (!txd_probe.empty()) {
+            // The loader reads the path itself; this also keeps the normal
+            // TXD code path and texture-name handling unchanged.
+            load_txd_to_gpu(path);
+            cash_txd_loaded = true;
+            break;
+        }
+    }
+    if (!cash_txd_loaded) {
+        LOGE("PLAYER TEXTURE MISSING: no se encontro cash_pc.txd en las rutas conocidas");
+    }
 
-    // Load Cash DFF
-    auto cash_raw = read_asset("cash_pc.dff");
+    // Load Cash DFF, probing the same common export layouts.
+    const char* cash_dff_paths[] = {
+        "cash_pc.dff",
+        "levels/asylum/pak/cash_pc.dff",
+        "export/ManHunt#pak/cash_pc.dff",
+        "export/ManHunt#pak/levels/Asylum/pak/cash_pc.dff"
+    };
+    std::vector<uint8_t> cash_raw;
+    const char* cash_dff_path = nullptr;
+    for (const char* path : cash_dff_paths) {
+        cash_raw = read_asset(path);
+        if (!cash_raw.empty()) {
+            cash_dff_path = path;
+            break;
+        }
+    }
     if (!cash_raw.empty()) {
+        LOGI("Cash DFF encontrado: %s", cash_dff_path);
         auto cash_models = dff_load_archive(cash_raw.data(), cash_raw.size());
         if (!cash_models.empty()) {
             ModelRenderData rd;
@@ -2207,6 +2220,8 @@ static void setup_model() {
             g_cash_y_offset = 0.0f;
             LOGI("Cash model loaded. Y-Offset manual: %.3f", g_cash_y_offset);
         }
+    } else {
+        LOGE("PLAYER MODEL MISSING: no se encontro cash_pc.dff; restaura el modelo desde tu copia del juego");
     }
 
     for (size_t i = 0; i < g_groups.size(); i++) {
@@ -2407,13 +2422,7 @@ static void setup_model() {
     auto ifp_raw = read_asset("levels/asylum/allanims.ifp");
     if (!ifp_raw.empty()) {
         g_anims = load_ifp(ifp_raw.data(), ifp_raw.size());
-        LOGI("REAL ANIMATION NAMES IN IFP:");
-        for (const auto& pair : g_anims) {
-            LOGI(" - %s", pair.first.c_str());
-        }
         rebuild_debug_animation_list();
-        dump_turn_animation_data();
-        dump_turn_track_rotations();
     } else {
         g_anims.clear();
         g_debug_anim_list.clear();
