@@ -4436,7 +4436,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeSetLightingDebugMode(JNIEnv*, jobject, jint mode) {
     g_lighting_debug_mode.store(std::max(0, std::min(3, static_cast<int>(mode))), std::memory_order_relaxed);
-    LOGI("LIGHTING DEBUG MODE: %d", g_lighting_debug_mode);
+    LOGI("LIGHTING DEBUG MODE: %d", g_lighting_debug_mode.load(std::memory_order_relaxed));
 }
 
 JNIEXPORT void JNICALL
