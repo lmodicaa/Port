@@ -15,8 +15,6 @@ Vec3 vec3_norm(Vec3 a) {
     return {a.x/l, a.y/l, a.z/l};
 }
 
-struct Mat4 { float m[16]; };
-
 Mat4 mat4_identity() {
     return {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
 }
@@ -42,7 +40,7 @@ Mat4 mat4_perspective(float fovY, float aspect, float nearZ, float farZ) {
 }
 
 // Construye view matrix FPS a partir de posicion + yaw + pitch
-Mat4 mat4_fps_view(Vec3 pos, float yaw, float pitch) {
+[[maybe_unused]] Mat4 mat4_fps_view(Vec3 pos, float yaw, float pitch) {
     float cy = cosf(yaw),   sy = sinf(yaw);
     float cp = cosf(pitch), sp = sinf(pitch);
 
