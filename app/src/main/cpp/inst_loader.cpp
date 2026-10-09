@@ -90,11 +90,38 @@ std::vector<EntityInst> parse_inst(const std::vector<uint8_t>& data) {
             const size_t class_start = pos2 + 28;
             if (class_start < record_size) {
                 size_t class_end = class_start;
-                if (!find_nul(class_start, class_end)) class_end = record_size;
+                const bool class_terminated = find_nul(class_start, class_end);
+                if (!class_terminated) class_end = record_size;
                 ent.entity_class.assign(
                     reinterpret_cast<const char*>(block + class_start),
                     class_end - class_start
                 );
+
+                // In MH1 INST the unnamed parameter tail consists of int32s.
+                // Start after the NUL-terminated class and its 4-byte padding.
+                // If the class is not terminated, do not guess where params begin.
+                if (class_terminated) {
+                    const size_t params_start =
+                        (class_end + 1 + 3) & ~static_cast<size_t>(3);
+                    for (size_t p = params_start;
+                         p + sizeof(int32_t) <= record_size;
+                         p += sizeof(int32_t)) {
+                        int32_t value = 0;
+                        std::memcpy(&value, block + p, sizeof(value));
+                        ent.parameters.push_back(value);
+                    }
+                }
+            }
+
+            if (ent.entity_class.find("Light_Inst") != std::string::npos) {
+                std::string values;
+                for (size_t p = 0; p < ent.parameters.size(); ++p) {
+                    if (p) values += ",";
+                    values += std::to_string(ent.parameters[p]);
+                }
+                LOGI("INST RAW PARAMS: name='%s' model='%s' class='%s' count=%zu values=[%s]",
+                     ent.name.c_str(), ent.model.c_str(), ent.entity_class.c_str(),
+                     ent.parameters.size(), values.c_str());
             }
 
             // Publish only after every required field was parsed successfully.
