@@ -1284,9 +1284,26 @@ static void load_asylum_environment() {
         }
     }
     if (selected != weather.end()) {
-        const auto sky = selected->second.find("SKY");
-        if (sky != selected->second.end()) {
-            const auto rgb = parse_ini_numbers(sky->second);
+        std::string sky_value;
+        std::string sky_record = selected->first;
+        const auto selected_sky = selected->second.find("SKY");
+        if (selected_sky != selected->second.end()) {
+            sky_value = selected_sky->second;
+        } else {
+            for (const auto& name : weather_order) {
+                const auto it = weather.find(name);
+                if (it != weather.end()) {
+                    const auto candidate = it->second.find("SKY");
+                    if (candidate != it->second.end()) {
+                        sky_value = candidate->second;
+                        sky_record = name;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!sky_value.empty()) {
+            const auto rgb = parse_ini_numbers(sky_value);
             if (rgb.size() >= 3) {
                 for (int i = 0; i < 3; ++i) g_sky_color[i] = std::clamp(rgb[i] / 255.0f, 0.0f, 1.0f);
             }
@@ -1315,10 +1332,10 @@ static void load_asylum_environment() {
         } else {
             fog_start_record = "fallback_default_30.0";
         }
-        LOGI("ENV weather: record='%s' selection=%s SKY=(%.2f,%.2f,%.2f)/255 FOGSTART=%.3f source_record='%s'",
+        LOGI("ENV weather: record='%s' selection=%s SKY=(%.2f,%.2f,%.2f)/255 sky_source='%s' FOGSTART=%.3f fog_source='%s'",
              selected->first.c_str(), weather_ref_resolved ? "world1-reference" : "file-order-first-match-unverified",
              g_sky_color[0] * 255.0f, g_sky_color[1] * 255.0f, g_sky_color[2] * 255.0f,
-             g_fog_start, fog_start_record.c_str());
+             sky_record.c_str(), g_fog_start, fog_start_record.c_str());
     } else {
         LOGE("ENV: no se encontró WEATHER.INI con SKY/FOGSTART; cielo=fog color y FOGSTART de respaldo=%.3f", g_fog_start);
         for (int i = 0; i < 3; ++i) g_sky_color[i] = g_fog_color[i];
