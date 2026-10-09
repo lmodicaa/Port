@@ -1,3 +1,5 @@
+import argparse
+from pathlib import Path
 import struct
 
 def parse_bsp(filepath):
@@ -49,4 +51,7 @@ def parse_bsp(filepath):
     # 20: format (4)
     # Total = 21 * 4 = 84 bytes!
 
-parse_bsp('C:/Users/IK/Documents/Manhunt/gamedata/levels/asylum/scene1.bsp')
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Inspect a RenderWare BSP/World file.')
+    parser.add_argument('filepath', type=Path, help='Path to scene1.bsp or another BSP file')
+    parse_bsp(parser.parse_args().filepath)
