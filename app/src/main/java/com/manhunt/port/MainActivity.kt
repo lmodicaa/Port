@@ -4,6 +4,11 @@ import android.app.Activity
 import android.opengl.GLSurfaceView
 import android.os.Bundle
 import android.view.MotionEvent
+import android.view.Gravity
+import android.view.ViewGroup
+import android.graphics.Color
+import android.util.TypedValue
+import android.widget.FrameLayout
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.widget.Button
