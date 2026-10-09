@@ -3443,6 +3443,8 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     GLint loc_prelit_gamma = glGetUniformLocation(g_program, "u_prelit_gamma");
     GLint loc_cash_ambient = glGetUniformLocation(g_program, "u_cash_ambient");
     GLint loc_cash_directional = glGetUniformLocation(g_program, "u_cash_directional");
+    GLint loc_cash_point_light_pos = glGetUniformLocation(g_program, "u_cash_point_light_pos");
+    GLint loc_cash_point_light_found = glGetUniformLocation(g_program, "u_cash_point_light_found");
     GLint loc_fog_color = glGetUniformLocation(g_program, "u_fog_color");
     GLint loc_fog_start = glGetUniformLocation(g_program, "u_fog_start");
     GLint loc_fog_end = glGetUniformLocation(g_program, "u_fog_end");
@@ -3457,6 +3459,9 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     glUniform1f(loc_prelit_gamma, g_prelit_gamma.load(std::memory_order_relaxed));
     glUniform1f(loc_cash_ambient, g_cash_ambient.load(std::memory_order_relaxed));
     glUniform1f(loc_cash_directional, g_cash_directional.load(std::memory_order_relaxed));
+    glUniform3f(loc_cash_point_light_pos, g_cash_point_light_pos.x,
+                g_cash_point_light_pos.y, g_cash_point_light_pos.z);
+    glUniform1i(loc_cash_point_light_found, g_cash_point_light_found ? 1 : 0);
     glUniform1i(loc_is_cash, 0);
 
     glActiveTexture(GL_TEXTURE0);
