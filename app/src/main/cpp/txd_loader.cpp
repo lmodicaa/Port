@@ -205,6 +205,12 @@ static TXDTexture parse_texture_native(Reader& r, size_t chunk_end) {
         LOGE("TextureNative: no struct chunk");
         return tex;
     }
+    if (r.pos > chunk_end || hdr.size > chunk_end - r.pos ||
+        hdr.size < 88 || !r.can_read(hdr.size)) {
+        LOGE("TextureNative: struct truncado (size=%u)", hdr.size);
+        r.failed = true;
+        return tex;
+    }
     size_t struct_end = r.pos + hdr.size;
 
     uint32_t platform   = r.read<uint32_t>();
@@ -243,9 +249,14 @@ static TXDTexture parse_texture_native(Reader& r, size_t chunk_end) {
     else if (d3d_fmt == 0x33545844) dxt_type = 3; // DXT3
     else if (d3d_fmt == 0x35545844) dxt_type = 5; // DXT5
 
-    // Leer solo el mip 0 (el más grande)
+    // Leer solo el mip 0 (el más grande).
     uint32_t data_size = r.read<uint32_t>();
-    if (!r.can_read(data_size)) { LOGE("TXD: data truncado"); return tex; }
+    if (r.failed || !r.can_read(data_size) || r.pos > struct_end ||
+        data_size > struct_end - r.pos) {
+        LOGE("TXD: data truncado o fuera del struct");
+        r.failed = true;
+        return tex;
+    }
     
     // Manhunt PC hack: Texturas DXT no marcadas con FourCC
     if (dxt_type == 0 && data_size > 0) {
@@ -258,18 +269,43 @@ static TXDTexture parse_texture_native(Reader& r, size_t chunk_end) {
 
     const uint8_t* pixels = r.base + r.pos;
 
+    const size_t pixel_count = static_cast<size_t>(width) * static_cast<size_t>(height);
+    if (pixel_count > static_cast<size_t>(-1) / 4) {
+        LOGE("TXD: dimensiones desbordadas (%u x %u)", width, height);
+        return tex;
+    }
+
     if (dxt_type > 0) {
+        const size_t block_bytes = (dxt_type == 1) ? 8u : 16u;
+        const size_t blocks_x = (static_cast<size_t>(width) + 3u) / 4u;
+        const size_t blocks_y = (static_cast<size_t>(height) + 3u) / 4u;
+        if (blocks_x != 0 && blocks_y > static_cast<size_t>(-1) / blocks_x) {
+            LOGE("TXD: dimensiones DXT desbordadas");
+            return tex;
+        }
+        const size_t blocks = blocks_x * blocks_y;
+        if (blocks > static_cast<size_t>(-1) / block_bytes ||
+            data_size < blocks * block_bytes) {
+            LOGE("TXD: mip DXT truncado (data=%u)", data_size);
+            return tex;
+        }
         tex.rgba = decompress_dxt(pixels, width, height, dxt_type);
         LOGI("DXT%d decompressed %dx%d", dxt_type, width, height);
     } else {
-        tex.rgba.resize(width * height * 4);
-        size_t expected_size = (depth == 16) ? (width * height * 2) : (width * height * (depth / 8));
+        size_t expected_size = 0;
+        const size_t bytes_per_pixel = (depth == 16) ? 2u : static_cast<size_t>(depth / 8);
+        if (bytes_per_pixel == 0 || pixel_count > static_cast<size_t>(-1) / bytes_per_pixel) {
+            LOGE("TXD: profundidad/dimensiones inválidas (%u x %u, depth=%u)", width, height, depth);
+            return tex;
+        }
+        expected_size = pixel_count * bytes_per_pixel;
         if (data_size < expected_size) {
             LOGE("TXD: data_size (%d) es menor que el tamaño esperado (%d)", data_size, (int)expected_size);
             tex.valid = false;
             return tex;
         }
 
+        tex.rgba.resize(pixel_count * 4);
         if (depth == 16) {
             uint32_t fmt = raster_fmt & 0x0F00;
             const uint16_t* px16 = reinterpret_cast<const uint16_t*>(pixels);
