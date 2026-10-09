@@ -130,8 +130,15 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
             return DFFModel{};
         }
         uint32_t numMaterials = r.read<uint32_t>();
-        r.skip(ml_struct.size - sizeof(uint32_t));
-        
+        if (r.failed || numMaterials > ml_hdr.size / sizeof(ChunkHeader)) {
+            LOGE("BSP: cantidad de materiales inválida (%u)", numMaterials);
+            return DFFModel{};
+        }
+        if (!r.skip(ml_struct.size - sizeof(uint32_t))) {
+            LOGE("BSP: struct de material list truncado al avanzar");
+            return DFFModel{};
+        }
+
         model.material_textures.resize(numMaterials);
         for (uint32_t i = 0; i < numMaterials && r.pos < ml_end; i++) {
             ChunkHeader mat_hdr = r.read_chunk();
@@ -178,8 +185,18 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
                 if (th.type == 0x0006) { // Texture
                     size_t tex_end = r.pos + th.size;
                     ChunkHeader ts = r.read_chunk();
-                    r.skip(ts.size);
+                    if (r.failed || r.pos > tex_end || ts.size > tex_end - r.pos ||
+                        !r.can_read(ts.size) || !r.skip(ts.size) ||
+                        r.pos > tex_end || sizeof(ChunkHeader) > tex_end - r.pos) {
+                        LOGE("BSP: struct de textura truncado");
+                        return DFFModel{};
+                    }
                     ChunkHeader str_h = r.read_chunk();
+                    if (r.failed || r.pos > tex_end || str_h.size > tex_end - r.pos ||
+                        !r.can_read(str_h.size)) {
+                        LOGE("BSP: nombre de textura truncado");
+                        return DFFModel{};
+                    }
                     if (str_h.type == 0x0002) {
                         std::string tex_name(reinterpret_cast<const char*>(r.base + r.pos), str_h.size);
                         while(!tex_name.empty() && tex_name.back() == '\0') tex_name.pop_back();
@@ -215,16 +232,25 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
             uint32_t numTri      = r.read<uint32_t>();
             uint32_t numVert     = r.read<uint32_t>();
             // Struct header: matListBase(4)+numTri(4)+numVert(4)+bboxMin(12)+bboxMax(12)+pad(8) = 44 bytes
-            // We already read 12, skip the remaining bbox+padding
-            r.skip(32); // bboxMin(12) + bboxMax(12) + 2x uint32 unused(8)
+            // We already read 12, skip the remaining bbox+padding.
+            if (r.failed || st.size < 44 || !r.skip(32)) {
+                LOGE("BSP: struct de atomic inválido/truncado");
+                return DFFModel{};
+            }
+            const size_t tri_bytes = static_cast<size_t>(numTri) * 8u;
+            if (tri_bytes > st.size - 44 ||
+                static_cast<size_t>(numVert) > (st.size - 44 - tri_bytes) / 12u) {
+                LOGE("BSP: conteos fuera de límites (verts=%u tris=%u struct=%u)",
+                     numVert, numTri, st.size);
+                return DFFModel{};
+            }
 
             if (numVert > 0 && numTri > 0) {
                 uint32_t vertex_offset = (uint32_t)model.vertices.size();
 
                 // st.size = 44 (header) + numVert*bpv + numTri*8
                 // Solve for bytes_per_vert (includes position)
-                size_t tri_bytes = (size_t)numTri * 8;
-                size_t total_vert_bytes = (st.size > 44 + tri_bytes) ? (st.size - 44 - tri_bytes) : 0;
+                size_t total_vert_bytes = st.size - 44 - tri_bytes;
                 size_t bpv = (numVert > 0 && total_vert_bytes > 0) ? total_vert_bytes / numVert : 12;
 
                 // Manhunt PC: 28 bpv = pos(12)+normal(4)+color(4)+uv(8)
