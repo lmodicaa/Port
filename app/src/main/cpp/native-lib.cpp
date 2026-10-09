@@ -46,6 +46,7 @@ static WorldLighting g_world_lighting;
 static AAssetManager* g_assets   = nullptr;
 static std::string    g_base_path = "";
 static GLuint g_program           = 0;
+static int g_lighting_debug_mode = 0;
 static GLuint g_vao               = 0;
 static std::map<std::string, GLuint> g_tex_map;
 static std::map<std::string, Animation> g_anims;
@@ -3260,6 +3261,7 @@ Java_com_manhunt_port_ManhuntRenderer_nativeDrawFrame(JNIEnv*, jobject) {
     glUniform4fv(glGetUniformLocation(g_program, "u_world_ambient"), 1, g_world_lighting.ambient);
     glUniform4fv(glGetUniformLocation(g_program, "u_dir_ambient"), 1, g_world_lighting.dir_ambient);
     glUniform3fv(glGetUniformLocation(g_program, "u_light_dir"), 1, g_world_lighting.light_dir);
+    glUniform1i(glGetUniformLocation(g_program, "u_lighting_debug_mode"), g_lighting_debug_mode);
 
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(g_vao);
@@ -4430,6 +4432,12 @@ Java_com_manhunt_port_ManhuntRenderer_nativeLook(JNIEnv*, jobject, jfloat stick_
 
 // Siguiente animación de depuración.
 // Ciclo: automático -> bind pose -> animación 0 -> ... -> bind pose.
+JNIEXPORT void JNICALL
+Java_com_manhunt_port_ManhuntRenderer_nativeSetLightingDebugMode(JNIEnv*, jobject, jint mode) {
+    g_lighting_debug_mode = std::max(0, std::min(3, static_cast<int>(mode)));
+    LOGI("LIGHTING DEBUG MODE: %d", g_lighting_debug_mode);
+}
+
 JNIEXPORT void JNICALL
 Java_com_manhunt_port_ManhuntRenderer_nativeNextDebugAnimation(JNIEnv*, jobject) {
     if (g_debug_anim_list.empty()) {
