@@ -6,7 +6,11 @@
 #include <limits>
 #include <utility>
 
+#if defined(MANHUNT_VERBOSE_ASSET_LOGS)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "ManhuntCOL", __VA_ARGS__)
+#else
+#define LOGI(...) do { } while (0)
+#endif
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "ManhuntCOL", __VA_ARGS__)
 
 namespace {
