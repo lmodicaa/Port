@@ -1,3 +1,5 @@
+import argparse
+from pathlib import Path
 import struct
 
 def dump_duration(filepath):
@@ -27,4 +29,6 @@ def dump_duration(filepath):
             pos += 1
 
 if __name__ == "__main__":
-    dump_duration(r"C:\Users\Administrator\Documents\Port\app\src\main\assets\levels\asylum\allanims.ifp")
+    parser = argparse.ArgumentParser(description="Print the duration of Stand_Idle in an IFP.")
+    parser.add_argument("filepath", type=Path, help="Path to allanims.ifp")
+    dump_duration(parser.parse_args().filepath)
