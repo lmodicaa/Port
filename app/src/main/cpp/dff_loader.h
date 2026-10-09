@@ -26,9 +26,9 @@ struct DFFBone {
     float pos_z = 0.f;
 };
 
-// Material de RenderWare: color RGBA + coeficientes de iluminación.
-// Estos valores vienen directamente del struct del material (.bsp/.dff) —
-// son los que usa el motor original, no constantes inventadas.
+// Material de RenderWare: color RGBA y coeficientes ambient/specular/diffuse
+// almacenados en el asset. Leerlos no demuestra por sí solo cómo el juego
+// original los combina con luces; eso requiere verificar el pipeline de luces.
 struct MaterialData {
     float color[4]      = {1.f, 1.f, 1.f, 1.f}; // diffuse/color RGBA (0..1)
     float ambient       = 1.0f;                 // coeficiente ambiente default seguro
@@ -39,8 +39,8 @@ struct MaterialData {
 
 // Metadatos reales del RW_WORLD. Este struct de 64 bytes NO contiene
 // colores de iluminación: los campos de +16 en adelante son conteos/formato
-// y la caja envolvente. Los arrays legacy quedan sin disponibilidad explícita
-// para evitar que código antiguo los interprete como luz.
+// y la caja envolvente. Los arrays legacy se conservan temporalmente por
+// compatibilidad, pero no están disponibles y deben ignorarse cuando valid=false.
 struct WorldLighting {
     float ambient[4]     = {0.f, 0.f, 0.f, 0.f};
     float dir_ambient[4] = {0.f, 0.f, 0.f, 0.f};
