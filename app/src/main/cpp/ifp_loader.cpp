@@ -22,7 +22,7 @@ public:
     }
 
     void seek(size_t position) {
-        if (position > size_) {
+        if (position > size_ || (position != 0 && data_ == nullptr)) {
             throw std::runtime_error("IFP seek out of range");
         }
 
@@ -30,11 +30,17 @@ public:
     }
 
     void skip(size_t count) {
-        seek(pos_ + count);
+        if (pos_ > size_ || count > size_ - pos_) {
+            throw std::runtime_error(
+                "IFP skip out of range at offset " +
+                std::to_string(pos_) + " (bytes=" + std::to_string(count) + ")"
+            );
+        }
+        pos_ += count;
     }
 
     void need(size_t count) const {
-        if (count > size_ - pos_) {
+        if (pos_ > size_ || (count != 0 && data_ == nullptr) || count > size_ - pos_) {
             throw std::runtime_error(
                 "Unexpected end of IFP at offset " +
                 std::to_string(pos_)
@@ -787,6 +793,7 @@ std::map<std::string, Animation> load_ifp(
             "ERROR parseando IFP: %s",
             e.what()
         );
+        animations.clear();
     }
 
     return animations;
