@@ -11,6 +11,7 @@
 #include <vector>
 #include <cmath>
 #include <cctype>
+#include <cstdlib>
 #include <cstddef>
 #include <fstream>
 #include <algorithm>
@@ -1125,6 +1126,153 @@ static void upload_dff_to_gpu(const DFFModel& model, ModelRenderData& rd) {
 
 static std::vector<uint8_t> read_asset(const char* path) {
     return level_read_asset(g_assets, g_base_path, path);
+}
+
+static float g_fog_color[4] = {6.0f / 255.0f, 6.0f / 255.0f, 6.0f / 255.0f, 0.0f};
+static float g_sky_color[3] = {6.0f / 255.0f, 6.0f / 255.0f, 6.0f / 255.0f};
+static float g_fog_start = 30.0f;
+static float g_far_clip = 120.0f;
+static float g_near_clip = 0.1f;
+static bool g_linear_fog_enabled = true;
+
+static std::string trim_ini(std::string value) {
+    const size_t first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return "";
+    const size_t last = value.find_last_not_of(" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+static std::string ini_key(std::string value) {
+    value = trim_ini(std::move(value));
+    for (char& ch : value) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+    return value;
+}
+
+static std::vector<float> parse_ini_numbers(const std::string& value) {
+    std::vector<float> result;
+    std::string token;
+    std::stringstream stream(value);
+    while (std::getline(stream, token, ',')) {
+        token = trim_ini(token);
+        if (token.empty()) continue;
+        char* end = nullptr;
+        const float parsed = std::strtof(token.c_str(), &end);
+        if (end != token.c_str() && *end == '\\0') result.push_back(parsed);
+    }
+    return result;
+}
+
+static std::map<std::string, std::map<std::string, std::string>> parse_ini_records(
+    const std::vector<uint8_t>& bytes) {
+    std::map<std::string, std::map<std::string, std::string>> records;
+    if (bytes.empty()) return records;
+    std::istringstream input(std::string(bytes.begin(), bytes.end()));
+    std::string line;
+    std::string current_record;
+    while (std::getline(input, line)) {
+        line = trim_ini(line);
+        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
+        std::istringstream parts(line);
+        std::string first;
+        parts >> first;
+        const std::string key = ini_key(first);
+        if (key == "RECORD") {
+            std::string name;
+            parts >> name;
+            current_record = ini_key(name);
+            records[current_record];
+            continue;
+        }
+        if (key == "END") {
+            current_record.clear();
+            continue;
+        }
+        if (current_record.empty()) continue;
+        const size_t key_end = line.find_first_of(" \t");
+        if (key_end == std::string::npos) continue;
+        const std::string value = trim_ini(line.substr(key_end + 1));
+        records[current_record][key] = value;
+    }
+    return records;
+}
+
+static void load_asylum_environment() {
+    const auto setup = parse_ini_records(read_asset("levels/asylum/levelSetup.ini"));
+    auto world = setup.find("WORLD1");
+    if (world == setup.end()) {
+        LOGE("ENV: levelSetup.ini no contiene RECORD world1; se conservan valores de respaldo");
+    } else {
+        const auto& fields = world->second;
+        auto read_numbers = [&](const char* key) -> std::vector<float> {
+            auto it = fields.find(key);
+            return it == fields.end() ? std::vector<float>{} : parse_ini_numbers(it->second);
+        };
+        const auto fog = read_numbers("FOG_COLOUR");
+        if (fog.size() >= 3) {
+            for (int i = 0; i < 3; ++i) g_fog_color[i] = std::clamp(fog[i] / 255.0f, 0.0f, 1.0f);
+            g_fog_color[3] = fog.size() >= 4 ? std::clamp(fog[3] / 255.0f, 0.0f, 1.0f) : 1.0f;
+        }
+        const auto near_clip = read_numbers("NEAR_CLIP");
+        const auto far_clip = read_numbers("FAR_CLIP");
+        if (!near_clip.empty() && near_clip[0] > 0.0f) g_near_clip = near_clip[0];
+        if (!far_clip.empty() && far_clip[0] > g_near_clip) g_far_clip = far_clip[0];
+        auto type = fields.find("FOG_TYPE");
+        g_linear_fog_enabled = type != fields.end() && ini_key(type->second) == "LINEAR";
+        LOGI("ENV world1: FOG_COLOUR raw='%s' normalized=(%.4f,%.4f,%.4f,%.4f) FOG_TYPE='%s' NEAR_CLIP=%.3f FAR_CLIP=%.3f",
+             fields.count("FOG_COLOUR") ? fields.at("FOG_COLOUR").c_str() : "(missing)",
+             g_fog_color[0], g_fog_color[1], g_fog_color[2], g_fog_color[3],
+             type != fields.end() ? type->second.c_str() : "(missing)",
+             g_near_clip, g_far_clip);
+    }
+
+    // Weather records can vary by climate/state. Select a named record only
+    // when world1 explicitly references one; otherwise use the first record
+    // containing SKY and FOGSTART and log that this selection is unverified.
+    auto weather_bytes = read_asset("levels/asylum/WEATHER.INI");
+    if (weather_bytes.empty()) weather_bytes = read_asset("levels/asylum/weather.ini");
+    const auto weather = parse_ini_records(weather_bytes);
+    std::string wanted_weather;
+    if (world != setup.end()) {
+        for (const char* key : {"WEATHER", "WEATHER_TYPE", "WEATHER_ID"}) {
+            auto it = world->second.find(key);
+            if (it != world->second.end()) { wanted_weather = ini_key(it->second); break; }
+        }
+    }
+    auto selected = weather.end();
+    if (!wanted_weather.empty()) selected = weather.find(wanted_weather);
+    if (selected == weather.end()) {
+        for (auto it = weather.begin(); it != weather.end(); ++it) {
+            if (it->second.count("SKY") || it->second.count("FOGSTART")) {
+                selected = it;
+                break;
+            }
+        }
+    }
+    if (selected != weather.end()) {
+        const auto sky = selected->second.find("SKY");
+        if (sky != selected->second.end()) {
+            const auto rgb = parse_ini_numbers(sky->second);
+            if (rgb.size() >= 3) {
+                for (int i = 0; i < 3; ++i) g_sky_color[i] = std::clamp(rgb[i] / 255.0f, 0.0f, 1.0f);
+            }
+        }
+        const auto fog_start = selected->second.find("FOGSTART");
+        if (fog_start != selected->second.end()) {
+            const auto values = parse_ini_numbers(fog_start->second);
+            if (!values.empty() && values[0] >= 0.0f) g_fog_start = values[0];
+        }
+        LOGI("ENV weather: record='%s' selection=%s SKY=(%.2f,%.2f,%.2f)/255 FOGSTART=%.3f",
+             selected->first.c_str(), wanted_weather.empty() ? "first-match-unverified" : "world1-reference",
+             g_sky_color[0] * 255.0f, g_sky_color[1] * 255.0f, g_sky_color[2] * 255.0f, g_fog_start);
+    } else {
+        LOGE("ENV: no se encontró WEATHER.INI con SKY/FOGSTART; cielo=fog color y FOGSTART de respaldo=%.3f", g_fog_start);
+        for (int i = 0; i < 3; ++i) g_sky_color[i] = g_fog_color[i];
+    }
+    if (g_fog_start >= g_far_clip) {
+        LOGE("ENV: FOGSTART %.3f >= FAR_CLIP %.3f; se limita fog start a 80%% de FAR_CLIP",
+             g_fog_start, g_far_clip);
+        g_fog_start = g_far_clip * 0.8f;
+    }
 }
 
 // ── Raycast contra suelo ──────────────────────────────────────────────────────
@@ -2480,7 +2628,8 @@ Java_com_manhunt_port_ManhuntRenderer_nativeSurfaceCreated(JNIEnv*, jobject) {
     glDeleteShader(vert);
     glDeleteShader(frag);
 
-    glClearColor(0.3f, 0.4f, 0.5f, 1.0f);
+    load_asylum_environment();
+    glClearColor(g_sky_color[0], g_sky_color[1], g_sky_color[2], 1.0f);
     glEnable(GL_DEPTH_TEST);
     // GL_CULL_FACE desactivado — BSP tiene winding inconsistente
 
