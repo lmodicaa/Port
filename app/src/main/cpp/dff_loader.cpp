@@ -83,8 +83,19 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
         if (hdr.type == 0x000E) { // RW_FRAMELIST
             size_t frame_end = r.pos + hdr.size;
             ChunkHeader fstruct = r.read_chunk();
+            if (r.failed || fstruct.type != RW_STRUCT || fstruct.size < sizeof(uint32_t) ||
+                r.pos > frame_end || fstruct.size > frame_end - r.pos ||
+                !r.can_read(fstruct.size)) {
+                LOGE("DFF: FrameList struct truncado");
+                return DFFModel{};
+            }
             uint32_t frameCount = r.read<uint32_t>();
-            
+            constexpr size_t kFrameRecordBytes = 56; // 9 rotation floats + 3 position floats + parent + flags
+            if (r.failed || frameCount > (fstruct.size - sizeof(uint32_t)) / kFrameRecordBytes) {
+                LOGE("DFF: frameCount inválido (%u)", frameCount);
+                return DFFModel{};
+            }
+
             model.bones.resize(frameCount);
             for (uint32_t i = 0; i < frameCount; i++) {
                 // matrix (9 floats) - right, up, at
@@ -112,10 +123,20 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
             // Extensions
             for (uint32_t i = 0; i < frameCount; i++) {
                 ChunkHeader ext = r.read_chunk();
+                if (r.failed || r.pos > frame_end || ext.size > frame_end - r.pos ||
+                    !r.can_read(ext.size)) {
+                    LOGE("DFF: extension de frame truncada");
+                    return DFFModel{};
+                }
                 size_t ext_end = r.pos + ext.size;
 
                 while (r.pos <= ext_end && sizeof(ChunkHeader) <= ext_end - r.pos && r.can_read(sizeof(ChunkHeader)) && !r.failed) {
                     ChunkHeader plug = r.read_chunk();
+                    if (r.failed || r.pos > ext_end || plug.size > ext_end - r.pos ||
+                        !r.can_read(plug.size)) {
+                        LOGE("DFF: plugin de frame truncado");
+                        return DFFModel{};
+                    }
                     size_t plug_payload_start = r.pos;
                     size_t plug_payload_end =
                         plug_payload_start + plug.size;
@@ -374,21 +395,46 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
         
         // El siguiente chunk DEBE ser MaterialList (0x08)
         ChunkHeader ml_hdr;
-        if (r.pos + sizeof(ChunkHeader) <= geom_end) {
+        if (r.pos <= geom_end && sizeof(ChunkHeader) <= geom_end - r.pos) {
             ml_hdr = r.read_chunk();
+            if (r.failed || r.pos > geom_end || ml_hdr.size > geom_end - r.pos ||
+                !r.can_read(ml_hdr.size)) {
+                LOGE("DFF: MaterialList truncado");
+                return DFFModel{};
+            }
             if (ml_hdr.type == 0x0008) { // RW_MATERIAL_LIST
                 size_t ml_end = r.pos + ml_hdr.size;
                 ChunkHeader ml_struct = r.read_chunk();
+                if (r.failed || ml_struct.size < sizeof(uint32_t) ||
+                    r.pos > ml_end || ml_struct.size > ml_end - r.pos ||
+                    !r.can_read(ml_struct.size)) {
+                    LOGE("DFF: struct de MaterialList truncado");
+                    return DFFModel{};
+                }
                 uint32_t numMaterials = r.read<uint32_t>();
-                r.pos += (ml_struct.size - 4);
+                if (r.failed || numMaterials > (ml_struct.size - sizeof(uint32_t)) / sizeof(uint32_t)) {
+                    LOGE("DFF: numMaterials inválido (%u)", numMaterials);
+                    return DFFModel{};
+                }
+                r.skip(ml_struct.size - sizeof(uint32_t));
                 
                 model.material_textures.resize(numMaterials);
                 for (uint32_t i = 0; i < numMaterials && r.pos < ml_end; i++) {
                     ChunkHeader mat_hdr = r.read_chunk();
+                    if (r.failed || r.pos > ml_end || mat_hdr.size > ml_end - r.pos ||
+                        !r.can_read(mat_hdr.size)) {
+                        LOGE("DFF: material %u truncado", i);
+                        return DFFModel{};
+                    }
                     if (mat_hdr.type != 0x0007) { r.skip(mat_hdr.size); continue; }
                     size_t mat_end = r.pos + mat_hdr.size;
                     model.materials.resize(numMaterials);
                     ChunkHeader mat_struct = r.read_chunk();
+                    if (r.failed || r.pos > mat_end || mat_struct.size > mat_end - r.pos ||
+                        !r.can_read(mat_struct.size)) {
+                        LOGE("DFF: struct de material %u truncado", i);
+                        return DFFModel{};
+                    }
                     if (mat_struct.size >= 28) {
                         r.read<uint32_t>(); // flags
                         uint8_t r_c = r.read<uint8_t>();
@@ -411,12 +457,27 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
                     
                     while (r.pos < mat_end) {
                         ChunkHeader th = r.read_chunk();
+                        if (r.failed || r.pos > mat_end || th.size > mat_end - r.pos ||
+                            !r.can_read(th.size)) {
+                            LOGE("DFF: texture chunk truncado");
+                            return DFFModel{};
+                        }
                         if (th.type == 0x0006) {
                             size_t tex_end = r.pos + th.size;
                             ChunkHeader ts = r.read_chunk();
+                            if (r.failed || r.pos > tex_end || ts.size > tex_end - r.pos ||
+                                !r.can_read(ts.size)) {
+                                LOGE("DFF: texture struct truncado");
+                                return DFFModel{};
+                            }
                             r.skip(ts.size);
-                            
+
                             ChunkHeader str_h = r.read_chunk();
+                            if (r.failed || r.pos > tex_end || str_h.size > tex_end - r.pos ||
+                                !r.can_read(str_h.size)) {
+                                LOGE("DFF: nombre de textura truncado");
+                                return DFFModel{};
+                            }
                             if (str_h.type == 0x0002) {
                                 std::string tex_name(reinterpret_cast<const char*>(r.base + r.pos), str_h.size);
                                 while(!tex_name.empty() && tex_name.back() == '\0') tex_name.pop_back();
@@ -439,7 +500,7 @@ DFFModel dff_load(const uint8_t* data, size_t size) {
             ChunkHeader ch = r.read_chunk();
             if (ch.type == 0x0003) { // Extension
                 size_t ext_end = r.pos + ch.size;
-                while (r.pos + sizeof(ChunkHeader) <= ext_end) {
+                while (r.pos <= ext_end && sizeof(ChunkHeader) <= ext_end - r.pos && r.can_read(sizeof(ChunkHeader)) && !r.failed) {
                     ChunkHeader plugin = r.read_chunk();
                     if (plugin.type == 0x0116) { // Skin Plugin
                         uint8_t boneCount = r.read<uint8_t>();
