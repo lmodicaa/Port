@@ -113,7 +113,11 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
         r.pos = ws_start + ws_hdr.size;
     }
 
-    // El segundo hijo de RW_WORLD es RW_MATERIAL_LIST
+    // El segundo hijo de RW_WORLD es RW_MATERIAL_LIST.
+    if (r.pos > root_end || sizeof(ChunkHeader) > root_end - r.pos) {
+        LOGE("BSP: falta cabecera de MaterialList dentro de RW_WORLD");
+        return DFFModel{};
+    }
     ChunkHeader ml_hdr = r.read_chunk();
     if (r.failed || r.pos > root_end || ml_hdr.size > root_end - r.pos ||
         !r.can_read(ml_hdr.size)) {
@@ -176,6 +180,10 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
                 r.skip(mat_struct.size);
             }
             while (r.pos < mat_end) {
+                if (r.pos > mat_end || sizeof(ChunkHeader) > mat_end - r.pos) {
+                    LOGE("BSP: cabecera de subchunk de material truncada");
+                    return DFFModel{};
+                }
                 ChunkHeader th = r.read_chunk();
                 if (r.failed || r.pos > mat_end || th.size > mat_end - r.pos ||
                     !r.can_read(th.size)) {
@@ -218,6 +226,10 @@ DFFModel bsp_load(const uint8_t* data, size_t size) {
 
     // Ahora parseamos todo recursivamente buscando ATOMICSECTORs (0x0009)
     while (r.pos < root_end) {
+        if (r.pos > root_end || sizeof(ChunkHeader) > root_end - r.pos) {
+            LOGE("BSP: cabecera de chunk raíz truncada en %zu/%zu", r.pos, root_end);
+            return DFFModel{};
+        }
         ChunkHeader ch = r.read_chunk();
         
         if (ch.type == 0x0009) { // ATOMICSECTOR
