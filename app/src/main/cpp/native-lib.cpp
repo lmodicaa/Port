@@ -26,6 +26,7 @@
 #include "math3d.h"
 #include "animation_runtime.h"
 #include "collision_runtime.h"
+#include "level_runtime.h"
 
 #define LOG_TAG "Manhunt"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
@@ -1311,27 +1312,7 @@ static GLuint compile_shader(GLenum type, const char* src) {
 }
 
 static std::vector<uint8_t> read_asset(const char* path) {
-    if (!g_base_path.empty()) {
-        std::string full_path = g_base_path + "/" + path;
-        std::ifstream file(full_path, std::ios::binary | std::ios::ate);
-        if (file.is_open()) {
-            size_t size = file.tellg();
-            file.seekg(0, std::ios::beg);
-            std::vector<uint8_t> buffer(size);
-            if (file.read(reinterpret_cast<char*>(buffer.data()), size)) {
-                LOGI("Archivo cargado externamente: %s (%zu bytes)", full_path.c_str(), size);
-                return buffer;
-            }
-        }
-    }
-    if (!g_assets) return {};
-    AAsset* a = AAssetManager_open(g_assets, path, AASSET_MODE_BUFFER);
-    if (!a) { LOGE("Asset no encontrado: %s", path); return {}; }
-    size_t sz = AAsset_getLength(a);
-    std::vector<uint8_t> buf(sz);
-    AAsset_read(a, buf.data(), sz);
-    AAsset_close(a);
-    return buf;
+    return level_read_asset(g_assets, g_base_path, path);
 }
 
 // ── Raycast contra suelo ──────────────────────────────────────────────────────
