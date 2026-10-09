@@ -202,7 +202,8 @@ static TXDTexture parse_texture_native(Reader& r, size_t chunk_end) {
     // Buscar el chunk struct dentro del TextureNative
     ChunkHeader hdr;
     if (!r.find_chunk(RW_STRUCT, chunk_end, hdr)) {
-        LOGE("TextureNative: no struct chunk");
+        if (r.failed) LOGE("TextureNative: lectura fuera de límites al buscar struct");
+        else LOGE("TextureNative: no struct chunk");
         return tex;
     }
     if (r.pos > chunk_end || hdr.size > chunk_end - r.pos ||
@@ -385,9 +386,21 @@ std::vector<TXDTexture> txd_load_all(const uint8_t* data, size_t size) {
     LOGI("TXD: %d texturas, device=%d", tex_count, device_id);
 
     while (r.pos < txd_end) {
+        if (r.pos > txd_end || sizeof(ChunkHeader) > txd_end - r.pos) {
+            LOGE("TXD: cabecera de chunk final truncada en %zu/%zu", r.pos, txd_end);
+            return {};
+        }
         ChunkHeader tn;
         if (!r.find_chunk(RW_TEXTURE_NATIVE, txd_end, tn)) {
+            if (r.failed) {
+                LOGE("TXD: chunk nativo malformado dentro del diccionario");
+                return {};
+            }
             break;
+        }
+        if (r.pos > txd_end || tn.size > txd_end - r.pos) {
+            LOGE("TXD: TextureNative fuera de límites");
+            return {};
         }
         size_t tn_end = r.pos + tn.size;
         
