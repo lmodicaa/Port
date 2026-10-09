@@ -1156,10 +1156,14 @@ static std::vector<float> parse_ini_numbers(const std::string& value) {
     std::stringstream stream(value);
     while (std::getline(stream, token, ',')) {
         token = trim_ini(token);
+        while (!token.empty() && token.back() == ';') token.pop_back();
+        token = trim_ini(token);
         if (token.empty()) continue;
         char* end = nullptr;
         const float parsed = std::strtof(token.c_str(), &end);
-        if (end != token.c_str() && *end == '\\0') result.push_back(parsed);
+        if (end != token.c_str() && (*end == '\\0' || (*end == 'f' && end[1] == '\\0'))) {
+            result.push_back(parsed);
+        }
     }
     return result;
 }
