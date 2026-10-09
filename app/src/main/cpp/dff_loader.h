@@ -37,13 +37,25 @@ struct MaterialData {
     std::string texture;                        // nombre de textura (vacío = sin textura)
 };
 
-// Iluminación del mundo embebida en el RW_WORLD (.bsp).
-// Manhunt usa estos valores para iluminar toda la escena.
+// Metadatos reales del RW_WORLD. Este struct de 64 bytes NO contiene
+// colores de iluminación: los campos de +16 en adelante son conteos/formato
+// y la caja envolvente. Los arrays legacy quedan sin disponibilidad explícita
+// para evitar que código antiguo los interprete como luz.
 struct WorldLighting {
-    float ambient[4]     = {0.5f, 0.5f, 0.5f, 1.f};   // ambientColor del mundo
-    float dir_ambient[4] = {0.5f, 0.5f, 0.5f, 1.f};   // directionalAmbientColor
-    float light_dir[3]   = {0.f, -1.f, 0.f};          // lightDirection
-    bool  valid          = false;
+    float ambient[4]     = {0.f, 0.f, 0.f, 0.f};
+    float dir_ambient[4] = {0.f, 0.f, 0.f, 0.f};
+    float light_dir[3]   = {0.f, 0.f, 0.f};
+    uint32_t root_is_world_sector = 0;
+    float inv_world_origin[3] = {0.f, 0.f, 0.f};
+    uint32_t num_triangles = 0;
+    uint32_t num_vertices = 0;
+    uint32_t num_plane_sectors = 0;
+    uint32_t num_atomic_sectors = 0;
+    uint32_t col_sector_size = 0;
+    uint32_t format = 0;
+    float bbox_sup[3] = {0.f, 0.f, 0.f};
+    float bbox_inf[3] = {0.f, 0.f, 0.f};
+    bool valid = false; // siempre false para iluminación; no hay luz en RW_WORLD
 };
 
 // Geometría completa extraída del DFF
