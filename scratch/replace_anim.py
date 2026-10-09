@@ -1,6 +1,12 @@
+import argparse
+from pathlib import Path
 import sys
 
-with open('C:/Users/Administrator/Documents/Port/app/src/main/cpp/native-lib.cpp', 'r', encoding='utf-8') as f:
+repo_root = Path(__file__).resolve().parents[1]
+parser = argparse.ArgumentParser(description='Apply the legacy animation block replacement.')
+parser.add_argument('--target', type=Path, default=repo_root / 'app/src/main/cpp/native-lib.cpp')
+target = parser.parse_args().target
+with target.open('r', encoding='utf-8') as f:
     lines = f.readlines()
 
 start_idx = -1
